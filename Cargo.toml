@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rs-broker-server",
+    "crates/rs-broker-core",
+    "crates/rs-broker-proto",
+    "crates/rs-broker-db",
+    "crates/rs-broker-kafka",
+    "crates/rs-broker-config",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Kawin.Vir"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# gRPC
+tonic = "0.10"
+tonic-build = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+
+# HTTP/Web
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Database
+sqlx = { version = ">=0.8.1", features = ["runtime-tokio", "tls-rustls", "json", "chrono", "uuid"] }
+
+# Kafka (requires cmake or prebuilt librdkafka)
+rdkafka = { version = "0.36", features = ["tokio", "cmake-build"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+
+# Internal crates
+rs-broker-core = { path = "crates/rs-broker-core" }
+rs-broker-proto = { path = "crates/rs-broker-proto" }
+rs-broker-db = { path = "crates/rs-broker-db" }
+rs-broker-kafka = { path = "crates/rs-broker-kafka" }
+rs-broker-config = { path = "crates/rs-broker-config" }
+

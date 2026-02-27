@@ -1,0 +1,43 @@
+[package]
+name = "rs-broker-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rs-broker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+rs-broker-config = { workspace = true }
+rs-broker-core = { workspace = true }
+rs-broker-db = { workspace = true }
+rs-broker-kafka = { workspace = true }
+rs-broker-proto = { workspace = true }
+futures-util = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+criterion = "0.5"
+tokio = { version = "1.35", features = ["rt", "macros"] }
+
+[features]
+default = ["postgres"]
+postgres = ["rs-broker-db/postgres"]
+mysql = ["rs-broker-db/mysql"]
+tracing = ["tracing-subscriber/json"]

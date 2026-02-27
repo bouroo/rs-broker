@@ -1,0 +1,665 @@
+syntax = "proto3";
+
+package rsbroker;
+
+option go_package = "github.com/bouroo/rs-broker/proto/rsbroker";
+option java_multiple_files = true;
+option java_package = "com.burouo.rsbroker";
+
+// =============================================================================
+// rs-broker gRPC Service Definition
+// Unified interface for inbox/outbox pattern message broker
+// =============================================================================
+
+// Main service providing both producer and consumer operations
+service RsBroker {
+    // =========================================================================
+    // PRODUCER MODE - Outbox Pattern Operations
+    // =========================================================================
+    
+    /// Publish a single message to the outbox for eventual Kafka delivery
+    /// Returns immediately with message ID, actual publishing is async
+    rpc Publish(PublishRequest) returns (PublishResponse);
+    
+    /// Publish multiple messages in a single batch
+    /// All messages are persisted atomically
+    rpc PublishBatch(PublishBatchRequest) returns (PublishBatchResponse);
+    
+    /// Query the status of a previously published message
+    rpc GetMessageStatus(GetMessageStatusRequest) returns (GetMessageStatusResponse);
+    
+    /// Cancel a pending message that has not yet been published
+    rpc CancelMessage(CancelMessageRequest) returns (CancelMessageResponse);
+    
+    // =========================================================================
+    // CONSUMER MODE - Inbox Pattern Operations
+    // =========================================================================
+    
+    /// Register a subscriber service to receive messages
+    rpc RegisterSubscriber(RegisterSubscriberRequest) returns (RegisterSubscriberResponse);
+    
+    /// Unregister a subscriber service
+    rpc UnregisterSubscriber(UnregisterSubscriberRequest) returns (UnregisterSubscriberResponse);
+    
+    /// Update subscriber configuration
+    rpc UpdateSubscriber(UpdateSubscriberRequest) returns (UpdateSubscriberResponse);
+    
+    /// List all registered subscribers
+    rpc ListSubscribers(ListSubscribersRequest) returns (ListSubscribersResponse);
+    
+    // =========================================================================
+    // BIDIRECTIONAL STREAMING - Real-time Events
+    // =========================================================================
+    
+    /// Stream for downstream services to receive messages in real-time
+    /// Alternative to push-based gRPC callbacks
+    rpc SubscribeEvents(SubscribeEventsRequest) returns (stream DeliverEvent);
+    
+    /// Stream for upstream services to publish messages
+    rpc StreamPublish(stream PublishRequest) returns (stream PublishResponse);
+    
+    // =========================================================================
+    // ADMIN OPERATIONS
+    // =========================================================================
+    
+    /// Get broker health and metrics
+    rpc GetHealth(HealthRequest) returns (HealthResponse);
+    
+    /// Reprocess a message from DLQ
+    rpc ReprocessDlq(ReprocessDlqRequest) returns (ReprocessDlqResponse);
+    
+    /// List DLQ messages for monitoring
+    rpc ListDlqMessages(ListDlqMessagesRequest) returns (ListDlqMessagesResponse);
+}
+
+// =============================================================================
+// COMMON MESSAGE TYPES
+// =============================================================================
+
+/// Message header key-value pair
+message Header {
+    string key = 1;
+    string value = 2;
+}
+
+/// Message status enumeration
+enum MessageStatus {
+    MESSAGE_STATUS_UNSPECIFIED = 0;
+    MESSAGE_STATUS_PENDING = 1;
+    MESSAGE_STATUS_PUBLISHING = 2;
+    MESSAGE_STATUS_PUBLISHED = 3;
+    MESSAGE_STATUS_RETRYING = 4;
+    MESSAGE_STATUS_FAILED = 5;
+    MESSAGE_STATUS_DLQ = 6;
+    MESSAGE_STATUS_RECEIVED = 7;
+    MESSAGE_STATUS_PROCESSING = 8;
+    MESSAGE_STATUS_PROCESSED = 9;
+    MESSAGE_STATUS_DELIVERED = 10;
+}
+
+/// Delivery status for individual subscriber
+enum DeliveryStatus {
+    DELIVERY_STATUS_UNSPECIFIED = 0;
+    DELIVERY_STATUS_PENDING = 1;
+    DELIVERY_STATUS_DELIVERING = 2;
+    DELIVERY_STATUS_DELIVERED = 3;
+    DELIVERY_STATUS_RETRYING = 4;
+    DELIVERY_STATUS_FAILED = 5;
+}
+
+// =============================================================================
+// PRODUCER MODE - Request/Response Messages
+// =============================================================================
+
+/// Request to publish a single message
+message PublishRequest {
+    /// Unique identifier for idempotency - if not provided, one will be generated
+    string message_id = 1;
+    
+    /// Type of aggregate/entity this message relates to
+    string aggregate_type = 2;
+    
+    /// Unique identifier of the aggregate
+    string aggregate_id = 3;
+    
+    /// Type/name of the event
+    string event_type = 4;
+    
+    /// JSON-encoded message payload
+    bytes payload = 5;
+    
+    /// Optional headers for Kafka message
+    repeated Header headers = 6;
+    
+    /// Target Kafka topic
+    string topic = 7;
+    
+    /// Optional partition key for Kafka partitioning
+    string partition_key = 8;
+    
+    /// Override default retry configuration
+    RetryConfig retry_config = 9;
+    
+    /// Request metadata
+    RequestMetadata metadata = 10;
+}
+
+/// Response for publish request
+message PublishResponse {
+    /// Unique message identifier
+    string message_id = 1;
+    
+    /// Current status of the message
+    MessageStatus status = 2;
+    
+    /// Whether this was a duplicate request
+    bool duplicate = 3;
+    
+    /// Timestamp when message was accepted
+    int64 accepted_at = 4;
+    
+    /// Error message if request failed
+    string error = 5;
+}
+
+/// Request to publish multiple messages
+message PublishBatchRequest {
+    /// List of messages to publish
+    repeated PublishRequest messages = 1;
+    
+    /// Request metadata
+    RequestMetadata metadata = 2;
+}
+
+/// Response for batch publish request
+message PublishBatchResponse {
+    /// Individual responses for each message
+    repeated PublishResponse responses = 1;
+    
+    /// Number of successfully accepted messages
+    int32 success_count = 2;
+    
+    /// Number of failed messages
+    int32 failure_count = 3;
+}
+
+/// Request to get message status
+message GetMessageStatusRequest {
+    /// Message ID to query
+    string message_id = 1;
+    
+    /// Request metadata
+    RequestMetadata metadata = 2;
+}
+
+/// Response with message status
+message GetMessageStatusResponse {
+    /// Message ID
+    string message_id = 1;
+    
+    /// Current status
+    MessageStatus status = 2;
+    
+    /// Number of retry attempts made
+    int32 retry_count = 3;
+    
+    /// Timestamp of last status change
+    int64 last_updated = 4;
+    
+    /// Error message if failed
+    string error_message = 5;
+    
+    /// Timestamp when published to Kafka
+    int64 published_at = 6;
+    
+    /// Topic the message was published to
+    string topic = 7;
+}
+
+/// Request to cancel a pending message
+message CancelMessageRequest {
+    /// Message ID to cancel
+    string message_id = 1;
+    
+    /// Request metadata
+    RequestMetadata metadata = 2;
+}
+
+/// Response for cancel request
+message CancelMessageResponse {
+    /// Whether cancellation was successful
+    bool success = 1;
+    
+    /// Current status of the message
+    MessageStatus status = 2;
+    
+    /// Error message if cancellation failed
+    string error = 3;
+}
+
+// =============================================================================
+// CONSUMER MODE - Request/Response Messages
+// =============================================================================
+
+/// Request to register a subscriber
+message RegisterSubscriberRequest {
+    /// Unique identifier for this subscriber
+    string subscriber_id = 1;
+    
+    /// Human-readable service name
+    string service_name = 2;
+    
+    /// gRPC endpoint to call for message delivery
+    string grpc_endpoint = 3;
+    
+    /// Topic patterns to subscribe to - supports wildcards
+    /// Examples: "orders.*", "payments.created", "events.>"
+    repeated string topic_patterns = 4;
+    
+    /// Optional delivery configuration
+    DeliveryConfig delivery_config = 5;
+    
+    /// Request metadata
+    RequestMetadata metadata = 6;
+}
+
+/// Response for subscriber registration
+message RegisterSubscriberResponse {
+    /// Subscriber ID
+    string subscriber_id = 1;
+    
+    /// Whether registration was successful
+    bool success = 2;
+    
+    /// Error message if registration failed
+    string error = 3;
+}
+
+/// Request to unregister a subscriber
+message UnregisterSubscriberRequest {
+    /// Subscriber ID to unregister
+    string subscriber_id = 1;
+    
+    /// Request metadata
+    RequestMetadata metadata = 2;
+}
+
+/// Response for unregistration
+message UnregisterSubscriberResponse {
+    /// Whether unregistration was successful
+    bool success = 1;
+    
+    /// Error message if unregistration failed
+    string error = 2;
+}
+
+/// Request to update subscriber configuration
+message UpdateSubscriberRequest {
+    /// Subscriber ID to update
+    string subscriber_id = 1;
+    
+    /// New gRPC endpoint
+    string grpc_endpoint = 2;
+    
+    /// New topic patterns
+    repeated string topic_patterns = 3;
+    
+    /// Whether subscriber is active
+    bool active = 4;
+    
+    /// New delivery configuration
+    DeliveryConfig delivery_config = 5;
+    
+    /// Request metadata
+    RequestMetadata metadata = 6;
+}
+
+/// Response for update request
+message UpdateSubscriberResponse {
+    /// Whether update was successful
+    bool success = 1;
+    
+    /// Error message if update failed
+    string error = 2;
+}
+
+/// Request to list subscribers
+message ListSubscribersRequest {
+    /// Filter by topic pattern
+    string topic_filter = 1;
+    
+    /// Filter by active status
+    bool active_only = 2;
+    
+    /// Request metadata
+    RequestMetadata metadata = 3;
+}
+
+/// Response with subscriber list
+message ListSubscribersResponse {
+    /// List of subscribers
+    repeated SubscriberInfo subscribers = 1;
+}
+
+/// Information about a subscriber
+message SubscriberInfo {
+    /// Subscriber ID
+    string subscriber_id = 1;
+    
+    /// Service name
+    string service_name = 2;
+    
+    /// gRPC endpoint
+    string grpc_endpoint = 3;
+    
+    /// Subscribed topic patterns
+    repeated string topic_patterns = 4;
+    
+    /// Whether subscriber is active
+    bool active = 5;
+    
+    /// Timestamp when registered
+    int64 registered_at = 6;
+}
+
+// =============================================================================
+// STREAMING MESSAGES
+// =============================================================================
+
+/// Request to subscribe to event stream
+message SubscribeEventsRequest {
+    /// Subscriber ID - must be registered
+    string subscriber_id = 1;
+    
+    /// Topic patterns to receive
+    repeated string topic_patterns = 2;
+    
+    /// Start from beginning or latest
+    SubscriptionPosition position = 3;
+    
+    /// Request metadata
+    RequestMetadata metadata = 4;
+}
+
+/// Subscription starting position
+enum SubscriptionPosition {
+    SUBSCRIPTION_POSITION_UNSPECIFIED = 0;
+    SUBSCRIPTION_POSITION_LATEST = 1;
+    SUBSCRIPTION_POSITION_EARLIEST = 2;
+    SUBSCRIPTION_POSITION_TIMESTAMP = 3;
+}
+
+/// Event delivered to subscriber
+message DeliverEvent {
+    /// Unique message ID
+    string message_id = 1;
+    
+    /// Topic the message was received from
+    string topic = 2;
+    
+    /// Partition number
+    int32 partition = 3;
+    
+    /// Offset in partition
+    int64 offset = 4;
+    
+    /// Message key
+    string key = 5;
+    
+    /// Message payload
+    bytes payload = 6;
+    
+    /// Message headers
+    repeated Header headers = 7;
+    
+    /// Timestamp when message was produced
+    int64 timestamp = 8;
+    
+    /// Event type for routing
+    string event_type = 9;
+}
+
+// =============================================================================
+// ADMIN MESSAGES
+// =============================================================================
+
+/// Health check request
+message HealthRequest {
+    /// Include detailed metrics
+    bool include_metrics = 1;
+}
+
+/// Health check response
+message HealthResponse {
+    /// Overall health status
+    HealthStatus status = 1;
+    
+    /// Component health details
+    repeated ComponentHealth components = 2;
+    
+    /// Metrics if requested
+    BrokerMetrics metrics = 3;
+}
+
+/// Health status enumeration
+enum HealthStatus {
+    HEALTH_STATUS_UNSPECIFIED = 0;
+    HEALTH_STATUS_HEALTHY = 1;
+    HEALTH_STATUS_DEGRADED = 2;
+    HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+/// Health of a component
+message ComponentHealth {
+    /// Component name
+    string name = 1;
+    
+    /// Health status
+    HealthStatus status = 2;
+    
+    /// Additional details
+    string message = 3;
+}
+
+/// Broker metrics
+message BrokerMetrics {
+    /// Total messages in outbox
+    int64 outbox_pending = 1;
+    
+    /// Total messages in inbox
+    int64 inbox_pending = 2;
+    
+    /// Messages published today
+    int64 published_today = 3;
+    
+    /// Messages processed today
+    int64 processed_today = 4;
+    
+    /// Current DLQ count
+    int64 dlq_count = 5;
+    
+    /// Active subscribers
+    int64 active_subscribers = 6;
+    
+    /// Kafka connection status
+    bool kafka_connected = 7;
+    
+    /// Database connection status
+    bool database_connected = 8;
+}
+
+/// Request to reprocess DLQ messages
+message ReprocessDlqRequest {
+    /// Specific message ID to reprocess
+    string message_id = 1;
+    
+    /// Reprocess all messages from this topic
+    string topic = 2;
+    
+    /// Reprocess all DLQ messages
+    bool all = 3;
+    
+    /// Request metadata
+    RequestMetadata metadata = 4;
+}
+
+/// Response for reprocess request
+message ReprocessDlqResponse {
+    /// Number of messages reprocessed
+    int32 reprocessed_count = 1;
+    
+    /// Number of failures
+    int32 failure_count = 2;
+    
+    /// Error details
+    repeated string errors = 3;
+}
+
+/// Request to list DLQ messages
+message ListDlqMessagesRequest {
+    /// Filter by original topic
+    string topic = 1;
+    
+    /// Maximum results
+    int32 limit = 2;
+    
+    /// Offset for pagination
+    int32 offset = 3;
+    
+    /// Request metadata
+    RequestMetadata metadata = 4;
+}
+
+/// Response with DLQ messages
+message ListDlqMessagesResponse {
+    /// DLQ messages
+    repeated DlqMessageInfo messages = 1;
+    
+    /// Total count matching filter
+    int32 total_count = 2;
+}
+
+/// Information about a DLQ message
+message DlqMessageInfo {
+    /// Message ID
+    string message_id = 1;
+    
+    /// Original topic
+    string original_topic = 2;
+    
+    /// DLQ topic
+    string dlq_topic = 3;
+    
+    /// Failure reason
+    string failure_reason = 4;
+    
+    /// Number of retries attempted
+    int32 retry_count = 5;
+    
+    /// Timestamp when moved to DLQ
+    int64 created_at = 6;
+}
+
+// =============================================================================
+// CONFIGURATION TYPES
+// =============================================================================
+
+/// Retry configuration for a message
+message RetryConfig {
+    /// Maximum number of retry attempts
+    int32 max_retries = 1;
+    
+    /// Initial delay in milliseconds
+    int64 initial_delay_ms = 2;
+    
+    /// Multiplier for exponential backoff
+    double multiplier = 3;
+    
+    /// Maximum delay in milliseconds
+    int64 max_delay_ms = 4;
+    
+    /// Whether to route to DLQ on failure
+    bool enable_dlq = 5;
+    
+    /// Custom DLQ topic name
+    string dlq_topic = 6;
+}
+
+/// Delivery configuration for subscriber
+message DeliveryConfig {
+    /// Timeout for gRPC calls in milliseconds
+    int64 timeout_ms = 1;
+    
+    /// Maximum concurrent deliveries
+    int32 max_concurrent = 2;
+    
+    /// Retry configuration for deliveries
+    RetryConfig retry_config = 3;
+    
+    /// Whether to require acknowledgment
+    bool require_ack = 4;
+}
+
+/// Request metadata for tracing and auditing
+message RequestMetadata {
+    /// Correlation ID for request tracing
+    string correlation_id = 1;
+    
+    /// ID of the calling service
+    string source_service = 2;
+    
+    /// Timestamp of the request
+    int64 timestamp = 3;
+    
+    /// Additional context
+    map<string, string> context = 4;
+}
+
+// =============================================================================
+// CALLBACK SERVICE - Implemented by downstream services
+// =============================================================================
+
+/// Service that downstream services must implement to receive messages
+service RsBrokerCallback {
+    /// Called by rs-broker to deliver a message
+    rpc Deliver(DeliverRequest) returns (DeliverResponse);
+}
+
+/// Request delivered to subscriber
+message DeliverRequest {
+    /// Unique message ID
+    string message_id = 1;
+    
+    /// Topic the message was received from
+    string topic = 2;
+    
+    /// Message payload
+    bytes payload = 3;
+    
+    /// Message headers
+    repeated Header headers = 4;
+    
+    /// Timestamp when message was produced
+    int64 timestamp = 5;
+    
+    /// Event type
+    string event_type = 6;
+    
+    /// Retry attempt number
+    int32 retry_count = 7;
+}
+
+/// Response from subscriber
+message DeliverResponse {
+    /// Whether delivery was successful
+    bool success = 1;
+    
+    /// Error message if failed
+    string error = 2;
+    
+    /// Whether to retry delivery
+    bool retry = 3;
+    
+    /// Suggested delay before retry in milliseconds
+    int64 retry_delay_ms = 4;
+}

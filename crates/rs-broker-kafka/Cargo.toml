@@ -1,0 +1,30 @@
+[package]
+name = "rs-broker-kafka"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rdkafka = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+rs-broker-config = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { version = "1.35", features = ["rt", "macros", "sync"] }
+testcontainers = "0.23"
+once_cell = "1.19"
+rand = "0.8"
+
+[features]
+default = []
+ssl = ["rdkafka/ssl"]

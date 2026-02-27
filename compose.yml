@@ -1,0 +1,333 @@
+# =============================================================================
+# rs-broker Docker Compose - Full Feature Demo
+# =============================================================================
+# Demonstrates all essential features of rs-broker:
+# - Inbox/Outbox pattern with PostgreSQL
+# - Kafka message broker (KRaft mode)
+# - gRPC interface (producer + consumer modes)
+# - Dead Letter Queue (DLQ)
+# - Metrics with Prometheus
+# - Optional Schema Registry for Avro
+#
+# Usage:
+#   docker-compose up -d                    # Start core services
+#   docker-compose --profile demo up -d     # Start with demo client
+#   docker-compose --profile ui up -d       # Start with Kafka UI
+#   docker-compose --profile full up -d     # Start everything
+#   docker-compose down -v                  # Cleanup with volumes
+# =============================================================================
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+x-common-env: &common-env
+  RUST_LOG: info
+
+x-database-env: &database-env
+  RS_BROKER_DATABASE__HOST: postgres
+  RS_BROKER_DATABASE__PORT: 5432
+  RS_BROKER_DATABASE__USERNAME: rsbroker
+  RS_BROKER_DATABASE__PASSWORD: rsbroker_dev_password
+  RS_BROKER_DATABASE__DATABASE: rsbroker
+  RS_BROKER_DATABASE__MAX_CONNECTIONS: 25
+  RS_BROKER_DATABASE__MIN_CONNECTIONS: 5
+  RS_BROKER_DATABASE__AUTO_MIGRATE: "true"
+
+x-kafka-env: &kafka-env
+  RS_BROKER_KAFKA__BROKERS: kafka:9092
+  RS_BROKER_KAFKA__CONSUMER_GROUP_ID: rs-broker-consumer
+  RS_BROKER_KAFKA__CLIENT_ID: rs-broker
+
+x-retry-env: &retry-env
+  RS_BROKER_RETRY__MAX_RETRIES: 5
+  RS_BROKER_RETRY__INITIAL_DELAY_MS: 1000
+  RS_BROKER_RETRY__MULTIPLIER: 2.0
+  RS_BROKER_RETRY__MAX_DELAY_MS: 60000
+
+services:
+  # ===========================================================================
+  # Infrastructure Services
+  # ===========================================================================
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: rs-broker-postgres
+    environment:
+      POSTGRES_USER: rsbroker
+      POSTGRES_PASSWORD: rsbroker_dev_password
+      POSTGRES_DB: rsbroker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U rsbroker -d rsbroker"]
+    networks:
+      - backend
+
+  kafka:
+    image: confluentinc/cp-kafka:8.0.4
+    container_name: rs-broker-kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+    networks:
+      - backend
+
+  # ===========================================================================
+  # rs-broker Services - Demonstrates Producer/Consumer Modes
+  # ===========================================================================
+
+  rs-broker-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: rs-broker-producer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+      - "9090:9090"
+    environment:
+      <<: [*common-env, *database-env, *kafka-env, *retry-env]
+      RS_BROKER_SERVER__MODE: producer
+      RS_BROKER_SERVER__HOST: 0.0.0.0
+      RS_BROKER_SERVER__HTTP_PORT: 8080
+      RS_BROKER_SERVER__GRPC_PORT: 50051
+      RS_BROKER_METRICS__ENABLED: "true"
+      RS_BROKER_METRICS__PORT: 9090
+      RS_BROKER_OUTBOX__POLL_INTERVAL_MS: 100
+      RS_BROKER_OUTBOX__BATCH_SIZE: 100
+      RS_BROKER_DLQ__ENABLED: "true"
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+    networks:
+      - backend
+    profiles:
+      - producer
+      - full
+
+  rs-broker-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: rs-broker-consumer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+      - "50052:50051"
+      - "9091:9090"
+    environment:
+      <<: [*common-env, *database-env, *kafka-env, *retry-env]
+      RS_BROKER_SERVER__MODE: consumer
+      RS_BROKER_SERVER__HOST: 0.0.0.0
+      RS_BROKER_SERVER__HTTP_PORT: 8080
+      RS_BROKER_SERVER__GRPC_PORT: 50051
+      RS_BROKER_KAFKA__CONSUMER__TOPICS: events,orders,payments
+      RS_BROKER_KAFKA__CONSUMER__AUTO_OFFSET_RESET: earliest
+      RS_BROKER_METRICS__ENABLED: "true"
+      RS_BROKER_INBOX__MAX_CONCURRENT_DELIVERIES: 10
+      RS_BROKER_DLQ__ENABLED: "true"
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+    networks:
+      - backend
+    profiles:
+      - consumer
+      - full
+
+  rs-broker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: rs-broker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+      - "9090:9090"
+    environment:
+      <<: [*common-env, *database-env, *kafka-env, *retry-env]
+      RS_BROKER_SERVER__MODE: both
+      RS_BROKER_SERVER__HOST: 0.0.0.0
+      RS_BROKER_SERVER__HTTP_PORT: 8080
+      RS_BROKER_SERVER__GRPC_PORT: 50051
+      RS_BROKER_KAFKA__CONSUMER__TOPICS: events,orders,payments
+      RS_BROKER_METRICS__ENABLED: "true"
+      RS_BROKER_METRICS__PORT: 9090
+      RS_BROKER_OUTBOX__POLL_INTERVAL_MS: 100
+      RS_BROKER_INBOX__MAX_CONCURRENT_DELIVERIES: 10
+      RS_BROKER_DLQ__ENABLED: "true"
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+    networks:
+      - backend
+
+  # ===========================================================================
+  # Demo Client Service - Simulates downstream subscriber
+  # ===========================================================================
+
+  demo-subscriber:
+    image: python:3.12-slim
+    container_name: rs-broker-demo-subscriber
+    depends_on:
+      rs-broker:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ./examples:/app:ro
+    command: >
+      sh -c "
+        pip install grpcio grpcio-tools &&
+        python /app/subscriber_client.py
+      "
+    environment:
+      RS_BROKER_GRPC_ENDPOINT: rs-broker:50051
+      SUBSCRIBER_ID: demo-subscriber-1
+      TOPIC_PATTERNS: 'orders.*,payments.created'
+    networks:
+      - backend
+    profiles:
+      - demo
+      - full
+
+  # ===========================================================================
+  # Monitoring & Observability
+  # ===========================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: rs-broker-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - backend
+    profiles:
+      - monitoring
+      - full
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: rs-broker-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: rs-broker-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - backend
+    profiles:
+      - ui
+      - full
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.0.4
+    container_name: rs-broker-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAPSERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+    networks:
+      - backend
+    profiles:
+      - avro
+      - full
+
+  # ===========================================================================
+  # Development Tools
+  # ===========================================================================
+
+  grpcurl:
+    image: fullstorydev/grpcurl:latest
+    container_name: rs-broker-grpcurl
+    depends_on:
+      rs-broker:
+        condition: service_healthy
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      - backend
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  kafka_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+networks:
+  backend:
+    name: rs-broker-network
+    driver: bridge
