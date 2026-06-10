@@ -4,16 +4,31 @@ use criterion::{black_box, criterion_group, Criterion};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use rs_broker_db::{outbox::MessageStatus, test_utils::setup_test_db, DbPool};
+use rs_broker_config::DatabaseConfig;
+use rs_broker_db::create_pool;
 use rs_broker_proto::rsbroker::{
-    GetMessageStatusRequest, GetMessageStatusResponse, Header, PublishRequest, PublishResponse,
+    rs_broker_server::RsBroker, GetMessageStatusRequest, Header, PublishRequest,
 };
 use rs_broker_server::grpc::service::RsBrokerService;
+
+fn get_database_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/postgres".to_string())
+}
 
 // Helper function to create a test service instance
 fn create_test_service() -> RsBrokerService {
     let rt = Runtime::new().unwrap();
-    let pool = rt.block_on(setup_test_db());
+    let database_url = get_database_url();
+    let pool = rt.block_on(async {
+        let config = DatabaseConfig {
+            url: database_url,
+            ..Default::default()
+        };
+        create_pool(&config)
+            .await
+            .expect("Failed to create database pool")
+    });
     RsBrokerService::new(pool)
 }
 

@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_config::RetryConfig;
 use rs_broker_core::outbox::manager::OutboxManager;
-use rs_broker_core::outbox::retry::RetryStrategy;
 use rs_broker_db::outbox::entity::{MessageStatus, OutboxMessage};
 use rs_broker_db::outbox::repository::OutboxError;
 use serde_json::json;
@@ -30,6 +29,10 @@ impl rs_broker_db::outbox::repository::OutboxRepository for MockOutboxRepository
     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError> {
         let mut guard = self.messages.lock().unwrap();
         guard.insert(message.id, message.clone());
+        Ok(())
+    }
+
+    async fn create_batch(&self, _messages: &[OutboxMessage]) -> Result<(), OutboxError> {
         Ok(())
     }
 
@@ -104,7 +107,7 @@ fn bench_manager_create_message(c: &mut Criterion) {
 
     c.bench_function("manager_create_message", |b| {
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let id = manager
                     .create_message(
                         "user".to_string(),
@@ -178,7 +181,7 @@ fn bench_manager_get_pending(c: &mut Criterion) {
             });
 
             b.iter(|| {
-                rt.block_on(async {
+                let _ = rt.block_on(async {
                     let pending = manager.get_pending_messages(limit).await;
                     black_box(pending)
                 });
@@ -211,7 +214,7 @@ fn bench_manager_mark_published(c: &mut Criterion) {
 
     c.bench_function("manager_mark_published", |b| {
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let result = manager.0.mark_published(manager.1).await;
                 black_box(result)
             });

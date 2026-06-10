@@ -3,7 +3,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
-use rdkafka::producer::{BaseProducer, Producer};
+use rdkafka::producer::Producer;
 use std::time::Duration;
 
 fn get_bootstrap_servers() -> String {

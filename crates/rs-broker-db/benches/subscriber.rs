@@ -72,7 +72,7 @@ pub fn bench_subscriber_get_all_active(c: &mut Criterion) {
             .expect("Failed to connect to database")
     });
 
-    let repo = SqlxSubscriberRepository::new(pool.clone());
+    let _repo = SqlxSubscriberRepository::new(pool.clone());
 
     c.bench_function("subscriber_get_all_active", |b| {
         b.iter(|| {
@@ -117,7 +117,7 @@ pub fn bench_subscriber_pattern_matching(c: &mut Criterion) {
             .ok();
 
         // Create diverse topic patterns
-        let all_patterns = vec![
+        let all_patterns = [
             // Exact matches
             vec!["orders.created".to_string()],
             vec!["orders.updated".to_string()],
@@ -251,7 +251,7 @@ pub fn bench_subscriber_crud(c: &mut Criterion) {
             );
             let id = sub.id;
 
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let repo = SqlxSubscriberRepository::new(pool.clone());
                 let result = repo.create(&sub).await;
 

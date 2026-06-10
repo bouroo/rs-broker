@@ -53,7 +53,7 @@ pub fn bench_inbox_create(c: &mut Criterion) {
             let offset = uuid::Uuid::new_v4().as_u128() as i64;
             let message = create_sample_message("orders.events", 0, offset);
 
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let repo = SqlxInboxRepository::new(pool.clone());
                 let result = repo.create(&message).await;
 
@@ -134,7 +134,7 @@ pub fn bench_inbox_get_by_topic_offset(c: &mut Criterion) {
     for (topic, partition, offset) in test_cases {
         group.throughput(Throughput::Elements(1));
         let topic_str = topic.to_string();
-        let repo = repo.clone();
+        let _repo = repo.clone();
 
         group.bench_function(
             BenchmarkId::new(

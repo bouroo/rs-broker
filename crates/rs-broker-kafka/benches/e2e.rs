@@ -118,7 +118,7 @@ fn bench_e2e_throughput(c: &mut Criterion) {
             }
 
             let elapsed = start.elapsed();
-            let throughput = 100 as f64 / elapsed.as_secs_f64();
+            let throughput = 100_f64 / elapsed.as_secs_f64();
             black_box(throughput)
         })
     });

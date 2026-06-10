@@ -59,7 +59,7 @@ fn bench_producer_send(c: &mut Criterion) {
                 )
                 .unwrap();
 
-            producer.flush(Duration::from_secs(5));
+            let _ = producer.flush(Duration::from_secs(5));
             drop(producer);
             black_box(())
         });
@@ -86,7 +86,7 @@ fn bench_producer_send_batch(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -113,7 +113,7 @@ fn bench_producer_compression(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -134,7 +134,7 @@ fn bench_producer_compression(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -161,7 +161,7 @@ fn bench_producer_acks(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -182,7 +182,7 @@ fn bench_producer_acks(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -209,7 +209,7 @@ fn bench_producer_linger(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });
@@ -230,7 +230,7 @@ fn bench_producer_linger(c: &mut Criterion) {
                     .unwrap();
             }
 
-            producer.flush(Duration::from_secs(10));
+            let _ = producer.flush(Duration::from_secs(10));
             drop(producer);
             black_box(())
         });

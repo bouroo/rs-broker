@@ -4,18 +4,32 @@ use criterion::{black_box, criterion_group, Criterion};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use rs_broker_db::{test_utils::setup_test_db, DbPool};
+use rs_broker_config::DatabaseConfig;
+use rs_broker_db::create_pool;
 use rs_broker_proto::rsbroker::{
-    ListSubscribersRequest, ListSubscribersResponse, RegisterSubscriberRequest,
-    RegisterSubscriberResponse, UnregisterSubscriberRequest, UnregisterSubscriberResponse,
-    UpdateSubscriberRequest, UpdateSubscriberResponse,
+    rs_broker_server::RsBroker, ListSubscribersRequest, RegisterSubscriberRequest,
+    UnregisterSubscriberRequest, UpdateSubscriberRequest,
 };
 use rs_broker_server::grpc::service::RsBrokerService;
+
+fn get_database_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/postgres".to_string())
+}
 
 // Helper function to create a test service instance
 fn create_test_service() -> RsBrokerService {
     let rt = Runtime::new().unwrap();
-    let pool = rt.block_on(setup_test_db());
+    let database_url = get_database_url();
+    let pool = rt.block_on(async {
+        let config = DatabaseConfig {
+            url: database_url,
+            ..Default::default()
+        };
+        create_pool(&config)
+            .await
+            .expect("Failed to create database pool")
+    });
     RsBrokerService::new(pool)
 }
 
@@ -95,7 +109,7 @@ fn bench_list_subscribers(c: &mut Criterion) {
         b.to_async(&rt).iter(|| {
             let service = black_box(&service);
             let request = tonic::Request::new(ListSubscribersRequest {
-                topic_filter: None,
+                topic_filter: String::new(),
                 active_only: true,
                 metadata: None,
             });

@@ -6,9 +6,17 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "rs-broker"
 path = "src/main.rs"
+
+[[bench]]
+name = "lib"
+path = "benches/lib.rs"
+harness = false
 
 [dependencies]
 tokio = { workspace = true }
@@ -33,7 +41,7 @@ rs-broker-proto = { workspace = true }
 futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { version = "0.5", features = ["async_tokio"] }
 tokio = { version = "1.35", features = ["rt", "macros"] }
 
 [features]

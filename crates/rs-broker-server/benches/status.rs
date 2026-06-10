@@ -1,14 +1,16 @@
 //! Benchmarks for gRPC Message Status service handlers
 
-use criterion::{black_box, criterion_group, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, Criterion};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
+use rs_broker_config::DatabaseConfig;
 use rs_broker_db::{
-    create_pool, outbox::MessageStatus, DbPool, OutboxMessage, SqlxOutboxRepository,
+    create_pool, outbox::MessageStatus, DbPool, OutboxMessage, OutboxRepository,
+    SqlxOutboxRepository,
 };
 use rs_broker_proto::rsbroker::{
-    GetMessageStatusRequest, GetMessageStatusResponse, Header, PublishRequest,
+    rs_broker_server::RsBroker, GetMessageStatusRequest,
 };
 use rs_broker_server::grpc::service::RsBrokerService;
 
@@ -18,16 +20,19 @@ fn get_database_url() -> String {
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/postgres".to_string())
 }
 
-// Helper function to create a test service instance
-fn create_test_service() -> RsBrokerService {
+// Helper function to create a test database pool
+fn create_test_pool() -> DbPool {
     let rt = Runtime::new().unwrap();
     let database_url = get_database_url();
-    let pool = rt.block_on(async {
-        create_pool(&database_url)
+    rt.block_on(async {
+        let config = DatabaseConfig {
+            url: database_url,
+            ..Default::default()
+        };
+        create_pool(&config)
             .await
             .expect("Failed to create database pool")
-    });
-    RsBrokerService::new(pool)
+    })
 }
 
 // Helper function to seed a test message in the database
@@ -62,12 +67,10 @@ async fn seed_test_message(pool: DbPool, status: MessageStatus) -> String {
 fn bench_get_message_status(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    // Create a test message first
-    let service = create_test_service();
-    let message_id = rt.block_on(seed_test_message(
-        service.db_pool.clone(),
-        MessageStatus::Published,
-    ));
+    let pool = create_test_pool();
+    let service = RsBrokerService::new(pool.clone());
+    let message_id =
+        rt.block_on(seed_test_message(pool, MessageStatus::Published));
 
     c.bench_function("get_message_status", |b| {
         b.to_async(&rt).iter(|| {
@@ -88,20 +91,22 @@ fn bench_get_message_status_concurrent(c: &mut Criterion) {
 
     let rt = Runtime::new().unwrap();
 
-    // Create multiple test messages
-    let service = create_test_service();
+    let pool = create_test_pool();
+    let service = RsBrokerService::new(pool.clone());
     let message_ids: Vec<String> = rt.block_on(async {
         let mut ids = Vec::new();
         for _ in 0..20 {
-            let id = seed_test_message(service.db_pool.clone(), MessageStatus::Published).await;
+            let id = seed_test_message(pool.clone(), MessageStatus::Published).await;
             ids.push(id);
         }
         ids
     });
 
+    let service = Arc::new(service);
+
     c.bench_function("get_message_status_concurrent", |b| {
         b.to_async(&rt).iter_with_large_drop(|| {
-            let service = Arc::new(black_box(service.clone()));
+            let service = Arc::clone(black_box(&service));
             let message_ids = Arc::new(black_box(message_ids.clone()));
             let semaphore = Arc::new(Semaphore::new(10)); // Limit concurrent requests
 

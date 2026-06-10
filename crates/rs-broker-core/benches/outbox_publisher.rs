@@ -76,6 +76,10 @@ impl OutboxRepository for MockOutboxRepository {
         Ok(())
     }
 
+    async fn create_batch(&self, _messages: &[OutboxMessage]) -> Result<(), OutboxError> {
+        Ok(())
+    }
+
     async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError> {
         let guard = self.messages.lock().unwrap();
         match guard.get(&id) {

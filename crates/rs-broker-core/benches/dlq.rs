@@ -77,7 +77,7 @@ impl rs_broker_db::dlq::repository::DlqRepository for MockDlqRepository {
             .collect();
 
         // Apply pagination
-        filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at)); // Sort by creation date descending
+        filtered.sort_by_key(|b| std::cmp::Reverse(b.created_at)); // Sort by creation date descending
         let start = offset as usize;
         let end = std::cmp::min(start + limit as usize, filtered.len());
         Ok(filtered[start..end].to_vec())
@@ -126,7 +126,7 @@ fn bench_dlq_move_message(c: &mut Criterion) {
 
     c.bench_function("dlq_move_message", |b| {
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let result = handler
                     .move_to_dlq(
                         Uuid::new_v4(),
@@ -203,9 +203,8 @@ fn bench_dlq_get_pending(c: &mut Criterion) {
                 });
 
                 b.iter(|| {
-                    rt.block_on(async {
-                        let topic_filter = topic.map(|s| s.as_ref());
-                        let messages = handler.get_messages(topic_filter, limit, 0).await;
+                    let _ = rt.block_on(async {
+                        let messages = handler.get_messages(topic, limit, 0).await;
                         black_box(messages)
                     });
                 });
@@ -258,7 +257,7 @@ fn bench_dlq_delete(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     // Pre-populate with messages and get an ID to delete
-    let (handler, message_id) = rt.block_on(async {
+    let (_handler, _message_id) = rt.block_on(async {
         let handler = create_test_dlq_handler();
 
         // Add a message and get its ID
@@ -279,7 +278,7 @@ fn bench_dlq_delete(c: &mut Criterion) {
 
     c.bench_function("dlq_delete", |b| {
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 // We need to recreate the message first since we're deleting it
                 let temp_handler = create_test_dlq_handler();
                 let temp_id = temp_handler
@@ -317,7 +316,7 @@ fn bench_dlq_count(c: &mut Criterion) {
 
     c.bench_function("dlq_count", |b| {
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let count = handler.count(None).await;
                 black_box(count)
             });

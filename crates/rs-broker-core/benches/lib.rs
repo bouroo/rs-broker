@@ -338,7 +338,7 @@ fn bench_pattern_wildcard_multi(c: &mut Criterion) {
 
 /// Benchmark complex pattern combinations
 fn bench_pattern_complex(c: &mut Criterion) {
-    let patterns = vec![
+    let patterns = [
         "user.created",
         "user.*",
         "order.?",
@@ -372,7 +372,7 @@ fn bench_pattern_registry_lookup(c: &mut Criterion) {
         let pattern = format!("{}_*", topic_base);
         registry
             .entry(pattern)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(format!("subscriber_{}", i));
     }
 

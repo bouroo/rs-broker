@@ -48,7 +48,7 @@ pub fn bench_outbox_create(c: &mut Criterion) {
                 "orders.events".to_string(),
             );
 
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let repo = SqlxOutboxRepository::new(pool.clone());
                 let result = repo.create(&message).await;
 
@@ -178,13 +178,13 @@ pub fn bench_outbox_mark_published(c: &mut Criterion) {
             .expect("Failed to connect to database")
     });
 
-    let repo = SqlxOutboxRepository::new(pool.clone());
+    let _repo = SqlxOutboxRepository::new(pool.clone());
     let message_id = test_message_id;
 
     c.bench_function("outbox_mark_published", |b| {
         let repo = SqlxOutboxRepository::new(pool.clone());
         b.iter(|| {
-            rt.block_on(async {
+            let _ = rt.block_on(async {
                 let result = repo.mark_published(message_id).await;
                 // Reset status for next iteration
                 sqlx::query("UPDATE outbox_messages SET status = 'pending' WHERE id = $1")

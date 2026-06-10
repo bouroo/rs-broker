@@ -4,9 +4,10 @@ use criterion::{black_box, criterion_group, BenchmarkId, Criterion, Throughput};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use rs_broker_db::{create_pool, DbPool};
+use rs_broker_config::DatabaseConfig;
+use rs_broker_db::create_pool;
 use rs_broker_proto::rsbroker::{
-    Header, PublishBatchRequest, PublishBatchResponse, PublishRequest, PublishResponse,
+    rs_broker_server::RsBroker, Header, PublishBatchRequest, PublishRequest,
 };
 use rs_broker_server::grpc::service::RsBrokerService;
 
@@ -21,7 +22,11 @@ fn create_test_service() -> RsBrokerService {
     let rt = Runtime::new().unwrap();
     let database_url = get_database_url();
     let pool = rt.block_on(async {
-        create_pool(&database_url)
+        let config = DatabaseConfig {
+            url: database_url,
+            ..Default::default()
+        };
+        create_pool(&config)
             .await
             .expect("Failed to create database pool")
     });
@@ -104,11 +109,11 @@ fn bench_publish_concurrent(c: &mut Criterion) {
     use tokio::sync::Semaphore;
 
     let rt = Runtime::new().unwrap();
-    let service = create_test_service();
+    let service = Arc::new(create_test_service());
 
     c.bench_function("publish_concurrent", |b| {
         b.to_async(&rt).iter_with_large_drop(|| {
-            let service = Arc::new(black_box(service.clone()));
+            let service = Arc::clone(black_box(&service));
             let semaphore = Arc::new(Semaphore::new(10)); // Limit concurrent requests
 
             async move {
