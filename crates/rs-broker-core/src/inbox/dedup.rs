@@ -1,48 +1,60 @@
 //! Deduplication logic
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Deduplicator for inbox messages
 pub struct Deduplicator {
-    seen: Arc<RwLock<HashSet<String>>>,
+    state: Arc<RwLock<DedupState>>,
     max_size: usize,
+}
+
+struct DedupState {
+    seen: HashSet<String>,
+    order: VecDeque<String>,
 }
 
 impl Deduplicator {
     /// Create a new deduplicator
     pub fn new(max_size: usize) -> Self {
         Self {
-            seen: Arc::new(RwLock::new(HashSet::new())),
+            state: Arc::new(RwLock::new(DedupState {
+                seen: HashSet::new(),
+                order: VecDeque::new(),
+            })),
             max_size,
         }
     }
 
     /// Check if a message is a duplicate
     pub async fn is_duplicate(&self, key: &str) -> bool {
-        let seen = self.seen.read().await;
-        seen.contains(key)
+        let state = self.state.read().await;
+        state.seen.contains(key)
     }
 
     /// Mark a message as seen
     pub async fn mark_seen(&self, key: String) {
-        let mut seen = self.seen.write().await;
+        let mut state = self.state.write().await;
 
-        // If we're at max size, clear half
-        if seen.len() >= self.max_size {
-            let to_remove: Vec<_> = seen.iter().take(self.max_size / 2).cloned().collect();
-            for k in to_remove {
-                seen.remove(&k);
+        // Evict oldest entries if at capacity
+        while state.seen.len() >= self.max_size {
+            if let Some(oldest) = state.order.pop_front() {
+                state.seen.remove(&oldest);
+            } else {
+                break;
             }
         }
 
-        seen.insert(key);
+        if state.seen.insert(key.clone()) {
+            state.order.push_back(key);
+        }
     }
 
     /// Clear all seen messages
     pub async fn clear(&self) {
-        let mut seen = self.seen.write().await;
-        seen.clear();
+        let mut state = self.state.write().await;
+        state.seen.clear();
+        state.order.clear();
     }
 }

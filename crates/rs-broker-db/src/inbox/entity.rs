@@ -15,6 +15,18 @@ pub enum InboxStatus {
     Failed,
 }
 
+impl std::fmt::Display for InboxStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            InboxStatus::Received => "received",
+            InboxStatus::Processing => "processing",
+            InboxStatus::Processed => "processed",
+            InboxStatus::Failed => "failed",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Inbox message entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboxMessage {

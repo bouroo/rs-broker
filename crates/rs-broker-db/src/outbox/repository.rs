@@ -1,8 +1,6 @@
 //! Outbox repository
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
-use crate::pool::DbPool;
-#[cfg(all(feature = "mysql", not(feature = "postgres")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -54,22 +52,15 @@ pub struct SqlxOutboxRepository {
     pool: DbPool,
 }
 
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+impl SqlxOutboxRepository {
+    /// Create a new repository
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
 #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-impl SqlxOutboxRepository {
-    /// Create a new repository
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[cfg(all(feature = "mysql", not(feature = "postgres")))]
-impl SqlxOutboxRepository {
-    /// Create a new repository
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
 #[async_trait]
 impl OutboxRepository for SqlxOutboxRepository {
     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError> {
@@ -91,7 +82,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(&message.headers)
         .bind(&message.topic)
         .bind(&message.partition_key)
-        .bind(format!("{:?}", message.status).to_lowercase())
+        .bind(message.status.to_string())
         .bind(message.retry_count)
         .bind(&message.error_message)
         .bind(message.created_at)
@@ -108,7 +99,6 @@ impl OutboxRepository for SqlxOutboxRepository {
             return Ok(());
         }
 
-        // Use a transaction to ensure atomicity
         let mut tx = self.pool.begin().await?;
 
         for message in messages {
@@ -130,7 +120,7 @@ impl OutboxRepository for SqlxOutboxRepository {
             .bind(&message.headers)
             .bind(&message.topic)
             .bind(&message.partition_key)
-            .bind(format!("{:?}", message.status).to_lowercase())
+            .bind(message.status.to_string())
             .bind(message.retry_count)
             .bind(&message.error_message)
             .bind(message.created_at)
@@ -145,11 +135,145 @@ impl OutboxRepository for SqlxOutboxRepository {
     }
 
     async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError> {
-        let row =
-            sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = ?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
+        let row = sqlx::query_as::<_, OutboxMessageRow>(
+            "SELECT * FROM outbox_messages WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.into())
+    }
+
+    async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError> {
+        let rows = sqlx::query_as::<_, OutboxMessageRow>(
+            "SELECT * FROM outbox_messages WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1"
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn update_status(
+        &self,
+        id: Uuid,
+        status: MessageStatus,
+        error_message: Option<String>,
+    ) -> Result<(), OutboxError> {
+        sqlx::query(
+            "UPDATE outbox_messages SET status = $1, error_message = $2, updated_at = NOW() WHERE id = $3"
+        )
+        .bind(status.to_string())
+        .bind(&error_message)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {
+        sqlx::query(
+            "UPDATE outbox_messages SET status = 'published', published_at = NOW(), updated_at = NOW() WHERE id = $1"
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<(), OutboxError> {
+        sqlx::query("DELETE FROM outbox_messages WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "mysql", not(feature = "postgres")))]
+#[async_trait]
+impl OutboxRepository for SqlxOutboxRepository {
+    async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError> {
+        sqlx::query(
+            r#"
+            INSERT INTO outbox_messages (
+                id, aggregate_type, aggregate_id, event_type,
+                payload, headers, topic, partition_key,
+                status, retry_count, error_message,
+                created_at, updated_at, published_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(message.id)
+        .bind(&message.aggregate_type)
+        .bind(&message.aggregate_id)
+        .bind(&message.event_type)
+        .bind(&message.payload)
+        .bind(&message.headers)
+        .bind(&message.topic)
+        .bind(&message.partition_key)
+        .bind(message.status.to_string())
+        .bind(message.retry_count)
+        .bind(&message.error_message)
+        .bind(message.created_at)
+        .bind(message.updated_at)
+        .bind(message.published_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn create_batch(&self, messages: &[OutboxMessage]) -> Result<(), OutboxError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        for message in messages {
+            sqlx::query(
+                r#"
+                INSERT INTO outbox_messages (
+                    id, aggregate_type, aggregate_id, event_type,
+                    payload, headers, topic, partition_key,
+                    status, retry_count, error_message,
+                    created_at, updated_at, published_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(message.id)
+            .bind(&message.aggregate_type)
+            .bind(&message.aggregate_id)
+            .bind(&message.event_type)
+            .bind(&message.payload)
+            .bind(&message.headers)
+            .bind(&message.topic)
+            .bind(&message.partition_key)
+            .bind(message.status.to_string())
+            .bind(message.retry_count)
+            .bind(&message.error_message)
+            .bind(message.created_at)
+            .bind(message.updated_at)
+            .bind(message.published_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError> {
+        let row = sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(row.into())
     }
@@ -174,7 +298,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         sqlx::query(
             "UPDATE outbox_messages SET status = ?, error_message = ?, updated_at = NOW() WHERE id = ?"
         )
-        .bind(format!("{:?}", status).to_lowercase())
+        .bind(status.to_string())
         .bind(&error_message)
         .bind(id)
         .execute(&self.pool)

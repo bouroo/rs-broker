@@ -1,5 +1,7 @@
 //! Subscriber registry
 
+use std::sync::Arc;
+
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -8,7 +10,7 @@ use rs_broker_db::{DbPool, Subscriber, SubscriberRepository};
 
 /// Subscriber registry for managing subscribers
 pub struct SubscriberRegistry {
-    repository: Box<dyn SubscriberRepository>,
+    repository: Arc<dyn SubscriberRepository>,
 }
 
 impl SubscriberRegistry {
@@ -16,8 +18,13 @@ impl SubscriberRegistry {
     pub fn new(pool: DbPool) -> Self {
         let repository = SqlxSubscriberRepository::new(pool);
         Self {
-            repository: Box::new(repository),
+            repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
         }
+    }
+
+    /// Create a new subscriber registry with a custom repository (for testing)
+    pub fn with_repository(repository: Arc<dyn SubscriberRepository>) -> Self {
+        Self { repository }
     }
 
     /// Register a new subscriber

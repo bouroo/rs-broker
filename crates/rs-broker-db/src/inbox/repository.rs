@@ -1,8 +1,6 @@
 //! Inbox repository
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
-use crate::pool::DbPool;
-#[cfg(all(feature = "mysql", not(feature = "postgres")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -55,22 +53,114 @@ pub struct SqlxInboxRepository {
     pool: DbPool,
 }
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl SqlxInboxRepository {
     /// Create a new repository
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
+    }
+}
+
+#[cfg(all(feature = "postgres", not(feature = "mysql")))]
+#[async_trait]
+impl InboxRepository for SqlxInboxRepository {
+    async fn create(&self, message: &InboxMessage) -> Result<(), InboxError> {
+        sqlx::query(
+            r#"
+            INSERT INTO inbox_messages (
+                id, topic, partition, offset, key, event_type,
+                payload, headers, timestamp, status,
+                attempt_count, error_message, received_at, processed_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            "#,
+        )
+        .bind(message.id)
+        .bind(&message.topic)
+        .bind(message.partition)
+        .bind(message.offset)
+        .bind(&message.key)
+        .bind(&message.event_type)
+        .bind(&message.payload)
+        .bind(&message.headers)
+        .bind(message.timestamp)
+        .bind(message.status.to_string())
+        .bind(message.attempt_count)
+        .bind(&message.error_message)
+        .bind(message.received_at)
+        .bind(message.processed_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError> {
+        let row = sqlx::query_as::<_, InboxMessageRow>(
+            "SELECT * FROM inbox_messages WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.into())
+    }
+
+    async fn get_by_topic_offset(
+        &self,
+        topic: &str,
+        offset: i64,
+    ) -> Result<Option<InboxMessage>, InboxError> {
+        let row = sqlx::query_as::<_, InboxMessageRow>(
+            "SELECT * FROM inbox_messages WHERE topic = $1 AND offset = $2",
+        )
+        .bind(topic)
+        .bind(offset)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| r.into()))
+    }
+
+    async fn update_status(
+        &self,
+        id: Uuid,
+        status: InboxStatus,
+        error_message: Option<String>,
+    ) -> Result<(), InboxError> {
+        sqlx::query(
+            "UPDATE inbox_messages SET status = $1, error_message = $2, updated_at = NOW() WHERE id = $3"
+        )
+        .bind(status.to_string())
+        .bind(&error_message)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn mark_processed(&self, id: Uuid) -> Result<(), InboxError> {
+        sqlx::query(
+            "UPDATE inbox_messages SET status = 'processed', processed_at = NOW() WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<(), InboxError> {
+        sqlx::query("DELETE FROM inbox_messages WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }
 
 #[cfg(all(feature = "mysql", not(feature = "postgres")))]
-impl SqlxInboxRepository {
-    /// Create a new repository
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
 #[async_trait]
 impl InboxRepository for SqlxInboxRepository {
     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError> {
@@ -92,7 +182,7 @@ impl InboxRepository for SqlxInboxRepository {
         .bind(&message.payload)
         .bind(&message.headers)
         .bind(message.timestamp)
-        .bind(format!("{:?}", message.status).to_lowercase())
+        .bind(message.status.to_string())
         .bind(message.attempt_count)
         .bind(&message.error_message)
         .bind(message.received_at)
@@ -134,8 +224,8 @@ impl InboxRepository for SqlxInboxRepository {
         status: InboxStatus,
         error_message: Option<String>,
     ) -> Result<(), InboxError> {
-        sqlx::query("UPDATE inbox_messages SET status = ?, error_message = ? WHERE id = ?")
-            .bind(format!("{:?}", status).to_lowercase())
+        sqlx::query("UPDATE inbox_messages SET status = ?, error_message = ?, updated_at = NOW() WHERE id = ?")
+            .bind(status.to_string())
             .bind(&error_message)
             .bind(id)
             .execute(&self.pool)

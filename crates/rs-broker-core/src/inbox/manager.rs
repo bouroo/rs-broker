@@ -1,5 +1,7 @@
 //! Inbox manager
 
+use std::sync::Arc;
+
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -8,7 +10,7 @@ use rs_broker_db::{DbPool, InboxMessage, InboxRepository};
 
 /// Inbox manager for managing received messages
 pub struct InboxManager {
-    repository: Box<dyn InboxRepository>,
+    repository: Arc<dyn InboxRepository>,
 }
 
 impl InboxManager {
@@ -16,8 +18,13 @@ impl InboxManager {
     pub fn new(pool: DbPool) -> Self {
         let repository = SqlxInboxRepository::new(pool);
         Self {
-            repository: Box::new(repository),
+            repository: Arc::new(repository) as Arc<dyn InboxRepository>,
         }
+    }
+
+    /// Create a new inbox manager with a custom repository (for testing)
+    pub fn with_repository(repository: Arc<dyn InboxRepository>) -> Self {
+        Self { repository }
     }
 
     /// Store a message in the inbox

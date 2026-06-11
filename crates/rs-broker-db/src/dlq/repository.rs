@@ -1,8 +1,6 @@
 //! DLQ repository
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
-use crate::pool::DbPool;
-#[cfg(all(feature = "mysql", not(feature = "postgres")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -51,22 +49,112 @@ pub struct SqlxDlqRepository {
     pool: DbPool,
 }
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl SqlxDlqRepository {
     /// Create a new repository
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
+    }
+}
+
+#[cfg(all(feature = "postgres", not(feature = "mysql")))]
+#[async_trait]
+impl DlqRepository for SqlxDlqRepository {
+    async fn create(&self, message: &DlqMessage) -> Result<(), DlqError> {
+        sqlx::query(
+            r#"
+            INSERT INTO dlq_messages (
+                id, original_message_id, original_topic, dlq_topic,
+                failure_reason, retry_count, payload, headers, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+        )
+        .bind(message.id)
+        .bind(message.original_message_id)
+        .bind(&message.original_topic)
+        .bind(&message.dlq_topic)
+        .bind(&message.failure_reason)
+        .bind(message.retry_count)
+        .bind(&message.payload)
+        .bind(&message.headers)
+        .bind(message.created_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_by_id(&self, id: Uuid) -> Result<DlqMessage, DlqError> {
+        let row = sqlx::query_as::<_, DlqMessageRow>("SELECT * FROM dlq_messages WHERE id = $1")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(row.into())
+    }
+
+    async fn get_all(
+        &self,
+        topic: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<DlqMessage>, DlqError> {
+        let rows = if let Some(t) = topic {
+            sqlx::query_as::<_, DlqMessageRow>(
+                "SELECT * FROM dlq_messages WHERE original_topic = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+            )
+                .bind(t)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as::<_, DlqMessageRow>(
+                "SELECT * FROM dlq_messages ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn count(&self, topic: Option<&str>) -> Result<i64, DlqError> {
+        let count: (i64,) = if let Some(t) = topic {
+            sqlx::query_as("SELECT COUNT(*) FROM dlq_messages WHERE original_topic = $1")
+                .bind(t)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as("SELECT COUNT(*) FROM dlq_messages")
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        Ok(count.0)
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<(), DlqError> {
+        sqlx::query("DELETE FROM dlq_messages WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn delete_all(&self) -> Result<(), DlqError> {
+        sqlx::query("DELETE FROM dlq_messages")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }
 
 #[cfg(all(feature = "mysql", not(feature = "postgres")))]
-impl SqlxDlqRepository {
-    /// Create a new repository
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
 #[async_trait]
 impl DlqRepository for SqlxDlqRepository {
     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError> {

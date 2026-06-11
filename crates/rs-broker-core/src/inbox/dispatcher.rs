@@ -11,9 +11,9 @@ use rs_broker_db::{DbPool, Subscriber, SubscriberRepository};
 
 /// Message dispatcher
 pub struct Dispatcher {
-    subscriber_repository: Box<dyn SubscriberRepository>,
+    subscriber_repository: Arc<dyn SubscriberRepository>,
     /// Cache for topic pattern matching results
-    pattern_cache: Arc<RwLock<HashMap<String, Vec<String>>>>, // topic -> vec of matching subscriber IDs
+    pattern_cache: Arc<RwLock<HashMap<String, Vec<Subscriber>>>>, // topic -> vec of matching subscribers
     /// Maximum cache size
     max_cache_size: usize,
 }
@@ -23,9 +23,18 @@ impl Dispatcher {
     pub fn new(pool: DbPool) -> Self {
         let repository = SqlxSubscriberRepository::new(pool);
         Self {
-            subscriber_repository: Box::new(repository),
+            subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
             pattern_cache: Arc::new(RwLock::new(HashMap::new())),
             max_cache_size: 1000, // Maximum entries in the pattern cache
+        }
+    }
+
+    /// Create a new dispatcher with a custom subscriber repository (for testing)
+    pub fn with_repository(subscriber_repository: Arc<dyn SubscriberRepository>) -> Self {
+        Self {
+            subscriber_repository,
+            pattern_cache: Arc::new(RwLock::new(HashMap::new())),
+            max_cache_size: 1000,
         }
     }
 
@@ -34,14 +43,8 @@ impl Dispatcher {
         // Check if we have cached results for this topic
         {
             let cache = self.pattern_cache.read().await;
-            if let Some(cached_subscriber_ids) = cache.get(topic) {
-                // Retrieve subscribers by their IDs from the cache
-                let all_subscribers = self.subscriber_repository.get_all_active().await?;
-                let matching: Vec<Subscriber> = all_subscribers
-                    .into_iter()
-                    .filter(|s| cached_subscriber_ids.contains(&s.id.to_string()))
-                    .collect();
-                return Ok(matching);
+            if let Some(cached) = cache.get(topic) {
+                return Ok(cached.clone());
             }
         }
 
@@ -50,7 +53,6 @@ impl Dispatcher {
 
         // Filter subscribers by topic pattern
         let matching: Vec<Subscriber> = all
-            .clone()
             .into_iter()
             .filter(|s| {
                 s.topic_patterns
@@ -69,9 +71,7 @@ impl Dispatcher {
                 cache.clear();
             }
 
-            // Store the matching subscriber IDs for this topic
-            let subscriber_ids: Vec<String> = matching.iter().map(|s| s.id.to_string()).collect();
-            cache.insert(topic.to_string(), subscriber_ids);
+            cache.insert(topic.to_string(), matching.clone());
         }
 
         Ok(matching)

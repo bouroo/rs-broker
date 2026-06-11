@@ -1,5 +1,7 @@
 //! DLQ handler
 
+use std::sync::Arc;
+
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -8,7 +10,7 @@ use rs_broker_db::{DbPool, DlqMessage, DlqRepository};
 
 /// DLQ handler for managing dead letter messages
 pub struct DlqHandler {
-    repository: Box<dyn DlqRepository>,
+    repository: Arc<dyn DlqRepository>,
 }
 
 impl DlqHandler {
@@ -16,12 +18,12 @@ impl DlqHandler {
     pub fn new(pool: DbPool) -> Self {
         let repository = SqlxDlqRepository::new(pool);
         Self {
-            repository: Box::new(repository),
+            repository: Arc::new(repository) as Arc<dyn DlqRepository>,
         }
     }
 
     /// Create a new DLQ handler with a custom repository (for testing)
-    pub fn with_repository(repository: Box<dyn DlqRepository>) -> Self {
+    pub fn with_repository(repository: Arc<dyn DlqRepository>) -> Self {
         Self { repository }
     }
 

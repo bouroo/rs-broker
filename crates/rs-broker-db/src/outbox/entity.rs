@@ -17,6 +17,20 @@ pub enum MessageStatus {
     Dlq,
 }
 
+impl std::fmt::Display for MessageStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MessageStatus::Pending => "pending",
+            MessageStatus::Publishing => "publishing",
+            MessageStatus::Published => "published",
+            MessageStatus::Retrying => "retrying",
+            MessageStatus::Failed => "failed",
+            MessageStatus::Dlq => "dlq",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Outbox message entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboxMessage {

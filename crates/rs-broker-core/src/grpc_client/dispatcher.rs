@@ -2,13 +2,11 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, mpsc, OnceCell};
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use async_trait::async_trait;
 use tonic::{transport::Channel, Response, Status};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 use super::channel_pool::{ChannelPool, ChannelPoolConfig};
 
@@ -322,39 +320,48 @@ impl SubscriberDispatcher {
     
     /// Dispatch a message to a subscriber
     pub async fn dispatch(&self, subscriber: &Subscriber, request: DeliverRequest) -> DeliveryResult {
-        // Get or create endpoint
-        let endpoint = {
+        let subscriber_id = subscriber.id.to_string();
+
+        // Get or create endpoint and check circuit breaker under the write lock
+        let endpoint_addr = {
             let mut endpoints = self.endpoints.write().await;
-            endpoints
-                .entry(subscriber.id.to_string())
-                .or_insert_with(|| SubscriberEndpoint::new(subscriber.clone()))
-                .clone()
+            let endpoint = endpoints
+                .entry(subscriber_id.clone())
+                .or_insert_with(|| SubscriberEndpoint::new(subscriber.clone()));
+
+            // Check circuit breaker
+            if !endpoint.circuit_breaker.can_execute() {
+                return DeliveryResult {
+                    subscriber_id,
+                    success: false,
+                    error: Some("Circuit breaker open".to_string()),
+                    retry: true,
+                    retry_delay_ms: 1000,
+                };
+            }
+
+            endpoint.endpoint().to_string()
         };
-        
-        // Check circuit breaker
-        if !endpoint.circuit_breaker.can_execute() {
-            return DeliveryResult {
-                subscriber_id: subscriber.id.to_string(),
-                success: false,
-                error: Some("Circuit breaker open".to_string()),
-                retry: true,
-                retry_delay_ms: 1000,
-            };
-        }
-        
-        // Try to deliver with timeout
+
+        // Deliver with timeout (lock released during I/O)
+        let timeout_duration = Duration::from_secs(10);
         let result = timeout(
-            endpoint.circuit_breaker.config.request_timeout,
-            self.deliver_to_endpoint(endpoint.endpoint(), request),
+            timeout_duration,
+            self.deliver_to_endpoint(&endpoint_addr, request),
         )
         .await;
-        
-        // Update circuit breaker and return result
+
+        // Record result in circuit breaker
+        let mut endpoints = self.endpoints.write().await;
+        let endpoint = endpoints
+            .get_mut(&subscriber_id)
+            .expect("endpoint must exist after can_execute check");
+
         match result {
             Ok(Ok(response)) => {
-                // Success
+                endpoint.circuit_breaker.record_success();
                 DeliveryResult {
-                    subscriber_id: subscriber.id.to_string(),
+                    subscriber_id,
                     success: response.success,
                     error: if response.error.is_empty() { None } else { Some(response.error) },
                     retry: response.retry,
@@ -362,9 +369,9 @@ impl SubscriberDispatcher {
                 }
             }
             Ok(Err(e)) => {
-                // gRPC error
+                endpoint.circuit_breaker.record_failure();
                 DeliveryResult {
-                    subscriber_id: subscriber.id.to_string(),
+                    subscriber_id,
                     success: false,
                     error: Some(e.message().to_string()),
                     retry: true,
@@ -372,9 +379,9 @@ impl SubscriberDispatcher {
                 }
             }
             Err(_) => {
-                // Timeout
+                endpoint.circuit_breaker.record_failure();
                 DeliveryResult {
-                    subscriber_id: subscriber.id.to_string(),
+                    subscriber_id,
                     success: false,
                     error: Some("Request timeout".to_string()),
                     retry: true,

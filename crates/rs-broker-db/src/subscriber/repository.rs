@@ -46,15 +46,7 @@ pub struct SqlxSubscriberRepository {
     pool: DbPool,
 }
 
-#[cfg(all(feature = "postgres", not(feature = "mysql")))]
-impl SqlxSubscriberRepository {
-    /// Create a new repository
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[cfg(all(feature = "mysql", not(feature = "postgres")))]
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl SqlxSubscriberRepository {
     /// Create a new repository
     pub fn new(pool: DbPool) -> Self {

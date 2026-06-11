@@ -15,8 +15,6 @@ use rs_broker_proto::rsbroker::{
     UnregisterSubscriberResponse, UpdateSubscriberRequest, UpdateSubscriberResponse,
 };
 
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-use rs_broker_core::OutboxManager;
 use rs_broker_db::{
     OutboxMessage, OutboxRepository, SqlxOutboxRepository, SqlxSubscriberRepository, Subscriber,
     SubscriberRepository,
@@ -26,8 +24,6 @@ use rs_broker_db::{
 pub struct RsBrokerService {
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     db_pool: rs_broker_db::DbPool,
-    #[cfg(any(feature = "postgres", feature = "mysql"))]
-    _outbox_manager: OutboxManager,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     outbox_repo: SqlxOutboxRepository,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -40,13 +36,10 @@ pub struct RsBrokerService {
 impl RsBrokerService {
     /// Create a new RsBroker service
     pub fn new(db_pool: rs_broker_db::DbPool) -> Self {
-        let outbox_manager =
-            OutboxManager::new(db_pool.clone(), rs_broker_config::RetryConfig::default());
         let outbox_repo = SqlxOutboxRepository::new(db_pool.clone());
         let subscriber_repo = SqlxSubscriberRepository::new(db_pool.clone());
         Self {
             db_pool,
-            _outbox_manager: outbox_manager,
             outbox_repo,
             subscriber_repo,
         }
