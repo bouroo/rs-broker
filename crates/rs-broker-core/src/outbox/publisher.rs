@@ -17,14 +17,22 @@ pub struct OutboxPublisher {
 }
 
 impl OutboxPublisher {
-    /// Create a new publisher
+    /// Create a new publisher with its own Kafka producer built from the config.
     pub fn new(
         pool: DbPool,
         kafka_config: rs_broker_config::KafkaConfig,
         _retry_config: RetryConfig,
     ) -> Result<Self> {
-        let repository = SqlxOutboxRepository::new(pool);
         let producer = std::sync::Arc::new(KafkaProducer::new(&kafka_config)?);
+        Self::with_producer(pool, producer)
+    }
+
+    /// Create a new publisher that reuses a pre-built, shared Kafka producer.
+    ///
+    /// Use this when the producer must be shared with other components
+    /// (e.g. health checks) so it is constructed only once.
+    pub fn with_producer(pool: DbPool, producer: std::sync::Arc<KafkaProducer>) -> Result<Self> {
+        let repository = SqlxOutboxRepository::new(pool);
 
         Ok(Self {
             repository: std::sync::Arc::new(repository),

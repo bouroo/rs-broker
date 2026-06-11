@@ -1,23 +1,38 @@
 //! Application builder and runner
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{routing::get, Router};
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
+use rs_broker_core::inbox::InboxManager;
+use rs_broker_core::outbox::OutboxPublisher;
 use rs_broker_db::{create_pool, run_migrations};
+use rs_broker_kafka::{KafkaConsumer, KafkaProducer};
+use rs_broker_proto::rsbroker::rs_broker_server::RsBrokerServer;
+
+use crate::grpc;
 
 /// Application state holding initialized components
 pub struct App {
-    #[allow(dead_code)]
     settings: Settings,
     http_addr: SocketAddr,
-    #[allow(dead_code)]
     grpc_addr: SocketAddr,
-    #[allow(dead_code)]
     shutdown_tx: broadcast::Sender<()>,
+    grpc_service: RsBrokerServer<grpc::service::RsBrokerService>,
+    /// Outbox publisher kept on the `App` so its background task can be
+    /// stopped from the shutdown path. `None` when database features are
+    /// disabled (the publisher is not constructible in that build).
+    publisher: Option<OutboxPublisher>,
+    /// Kafka consumer for the inbox pipeline. `None` when no consumer topics
+    /// are configured or when database features are disabled.
+    consumer: Option<KafkaConsumer>,
+    /// Database pool for creating additional components at runtime.
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    db_pool: rs_broker_db::DbPool,
 }
 
 /// Builder for constructing the application
@@ -59,9 +74,71 @@ impl AppBuilder {
         run_migrations(&db_pool).await?;
         tracing::info!("Database migrations completed");
 
-        // TODO: wire Kafka producer/consumer, gRPC service, background outbox publisher
-        // using the db_pool and settings once those subsystems are ready.
-        let _ = db_pool;
+        // Construct the Kafka producer once and share it with the publisher
+        // and the gRPC health check. The producer itself does not establish
+        // a connection at construction time; it only validates the config.
+        let producer = Arc::new(KafkaProducer::new(&settings.kafka)?);
+        let kafka_connected = true;
+        tracing::info!(
+            "Kafka producer constructed for {}",
+            settings.kafka.bootstrap_servers
+        );
+
+        // Build the gRPC service with the Kafka health flag.
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        let grpc_service_inner =
+            grpc::service::RsBrokerService::with_kafka(db_pool.clone(), kafka_connected);
+
+        #[cfg(not(any(feature = "postgres", feature = "mysql")))]
+        #[allow(unused_variables)]
+        let grpc_service_inner = {
+            let _ = kafka_connected; // not used by the stub build
+            grpc::service::RsBrokerService::new(())
+        };
+
+        let grpc_service = RsBrokerServer::new(grpc_service_inner);
+
+        // Build the outbox publisher that drains pending messages to Kafka.
+        let publisher = OutboxPublisher::with_producer(db_pool.clone(), producer)?;
+
+        // Build the Kafka consumer if topics are configured.
+        let consumer = if settings.kafka.consumer.topics.is_empty() {
+            tracing::info!("No consumer topics configured — inbox pipeline disabled");
+            None
+        } else {
+            match KafkaConsumer::new(&settings.kafka) {
+                Ok(c) => {
+                    let topic_refs: Vec<&str> = settings
+                        .kafka
+                        .consumer
+                        .topics
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect();
+                    if let Err(e) = c.subscribe(&topic_refs) {
+                        tracing::warn!(
+                            "Failed to subscribe consumer to topics {:?}: {}. Consumer disabled.",
+                            settings.kafka.consumer.topics,
+                            e
+                        );
+                        None
+                    } else {
+                        tracing::info!(
+                            "Kafka consumer subscribed to topics: {:?}",
+                            settings.kafka.consumer.topics
+                        );
+                        Some(c)
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to create Kafka consumer: {}. Inbox pipeline disabled.",
+                        e
+                    );
+                    None
+                }
+            }
+        };
 
         let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -73,6 +150,11 @@ impl AppBuilder {
             http_addr,
             grpc_addr,
             shutdown_tx,
+            grpc_service,
+            publisher: Some(publisher),
+            consumer,
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            db_pool: db_pool.clone(),
         })
     }
 }
@@ -93,18 +175,120 @@ impl App {
 
     /// Run the application until shutdown
     pub async fn run(self) -> anyhow::Result<()> {
+        let grpc_addr = self.grpc_addr;
+        let grpc_service = self.grpc_service;
+        let shutdown_tx = self.shutdown_tx;
+        let mut publisher = self.publisher;
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        let consumer = self.consumer;
+        #[cfg(not(any(feature = "postgres", feature = "mysql")))]
+        let _consumer = self.consumer;
+        let settings = self.settings;
+
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        let db_pool = self.db_pool;
+
+        // Start gRPC server in background
+        tokio::spawn(async move {
+            tracing::info!("Starting gRPC server on {}", grpc_addr);
+            if let Err(err) = tonic::transport::Server::builder()
+                .add_service(grpc_service)
+                .serve(grpc_addr)
+                .await
+            {
+                tracing::error!("gRPC server failed: {}", err);
+            }
+        });
+
+        // Start the outbox publisher background worker using config values.
+        if let Some(publisher) = publisher.as_mut() {
+            let batch_size = settings.server.publisher_batch_size;
+            let interval_ms = settings.server.publisher_interval_ms;
+            publisher.start(batch_size, interval_ms);
+            tracing::info!(
+                "Outbox publisher started (batch_size={}, interval_ms={})",
+                batch_size,
+                interval_ms
+            );
+        }
+
+        // Start the consumer pipeline if a consumer is available.
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        if let Some(consumer) = consumer {
+            let inbox_mgr = InboxManager::new(db_pool);
+            spawn_consumer_loop(consumer, inbox_mgr);
+        }
+
+        // Start HTTP server (blocks until shutdown)
         let listener = tokio::net::TcpListener::bind(self.http_addr).await?;
         tracing::info!("Starting HTTP server on {}", self.http_addr);
 
         let app = Self::router();
 
         axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal(self.shutdown_tx))
+            .with_graceful_shutdown(shutdown_signal(shutdown_tx))
             .await?;
 
-        tracing::info!("rs-broker server stopped");
+        // Stop the publisher after the HTTP server returns from shutdown.
+        if let Some(publisher) = publisher.take() {
+            let mut publisher = publisher;
+            publisher.stop().await;
+            tracing::info!("Outbox publisher stopped");
+        }
+
+        tracing::info!("rs-broker server stopped (config: {:?})", settings);
         Ok(())
     }
+}
+
+/// Spawn the consumer loop that reads from Kafka and stores messages in the inbox.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+fn spawn_consumer_loop(consumer: KafkaConsumer, inbox: InboxManager) {
+    let mut rx = consumer.stream();
+
+    tokio::spawn(async move {
+        while let Some(result) = rx.recv().await {
+            match result {
+                Ok(msg) => {
+                    let payload: serde_json::Value = if msg.payload.is_empty() {
+                        serde_json::json!({})
+                    } else {
+                        match serde_json::from_slice(&msg.payload) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to deserialize payload from topic {}: {}",
+                                    msg.topic,
+                                    e
+                                );
+                                continue;
+                            }
+                        }
+                    };
+
+                    match inbox
+                        .store_message(msg.topic.clone(), msg.partition, msg.offset, payload)
+                        .await
+                    {
+                        Ok(id) => {
+                            tracing::trace!(
+                                "Stored incoming message {} from topic {}",
+                                id,
+                                msg.topic
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to store incoming message: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Consumer stream error: {}", e);
+                }
+            }
+        }
+        tracing::info!("Consumer loop ended");
+    });
 }
 
 async fn health_handler() -> axum::Json<serde_json::Value> {

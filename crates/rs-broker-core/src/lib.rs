@@ -9,7 +9,7 @@ pub mod inbox;
 pub mod outbox;
 pub mod subscriber;
 
-pub use dlq::DlqHandler;
+pub use dlq::{DlqHandler, DlqSelector, ReprocessResult};
 pub use error::{Error, Result};
 pub use inbox::InboxManager;
 #[cfg(any(feature = "postgres", feature = "mysql"))]

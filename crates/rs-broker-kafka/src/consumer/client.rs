@@ -1,5 +1,8 @@
 //! Kafka consumer client
 
+use std::sync::Arc;
+
+use futures::StreamExt;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{BorrowedMessage, Headers, Message};
@@ -55,7 +58,7 @@ impl From<BorrowedMessage<'_>> for IncomingMessage {
 
 /// Kafka consumer wrapper
 pub struct KafkaConsumer {
-    consumer: StreamConsumer,
+    consumer: Arc<StreamConsumer>,
 }
 
 impl KafkaConsumer {
@@ -71,7 +74,9 @@ impl KafkaConsumer {
             .create::<StreamConsumer>()
             .map_err(KafkaError::RdKafka)?;
 
-        Ok(Self { consumer })
+        Ok(Self {
+            consumer: Arc::new(consumer),
+        })
     }
 
     /// Subscribe to topics
@@ -87,12 +92,35 @@ impl KafkaConsumer {
         &self.consumer
     }
 
-    /// Create a channel stream for consuming messages
+    /// Spawn a background task that polls Kafka and forwards deserialized
+    /// messages through the returned channel.
+    ///
+    /// The task stops when the receiver is dropped or the consumer stream ends.
     pub fn stream(&self) -> mpsc::Receiver<Result<IncomingMessage>> {
-        let (_tx, rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(100);
+        let consumer = Arc::clone(&self.consumer);
 
-        // Note: In a real implementation, this would spawn a task to poll Kafka
-        // and send messages to the channel. For now, we return the receiver.
+        tokio::spawn(async move {
+            let mut stream = consumer.stream();
+            while let Some(message) = stream.next().await {
+                match message {
+                    Ok(borrowed) => {
+                        let incoming = IncomingMessage::from(borrowed);
+                        if tx.send(Ok(incoming)).await.is_err() {
+                            // Receiver dropped — shut down.
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Kafka consumer error: {}", e);
+                        if tx.send(Err(KafkaError::RdKafka(e))).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            tracing::info!("Kafka consumer stream ended");
+        });
 
         rx
     }

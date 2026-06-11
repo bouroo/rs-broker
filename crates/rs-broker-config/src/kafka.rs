@@ -106,6 +106,12 @@ pub struct ConsumerConfig {
     /// Session timeout
     #[serde(default = "default_session_timeout_ms")]
     pub session_timeout_ms: i32,
+
+    /// Topics the consumer subscribes to at startup.
+    ///
+    /// Leave empty to disable the consumer pipeline.
+    #[serde(default)]
+    pub topics: Vec<String>,
 }
 
 fn default_group_id() -> String {
@@ -131,6 +137,7 @@ impl Default for ConsumerConfig {
             auto_offset_reset: default_auto_offset_reset(),
             enable_auto_commit: default_enable_auto_commit(),
             session_timeout_ms: default_session_timeout_ms(),
+            topics: Vec::new(),
         }
     }
 }

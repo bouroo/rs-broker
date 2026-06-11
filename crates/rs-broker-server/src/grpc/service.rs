@@ -4,13 +4,14 @@ use chrono::Utc;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+use rs_broker_core::dlq::{DlqHandler, DlqSelector};
 use rs_broker_proto::rsbroker::{
     rs_broker_server::RsBroker, BrokerMetrics, CancelMessageRequest, CancelMessageResponse,
-    ComponentHealth, DeliverEvent, GetMessageStatusRequest, GetMessageStatusResponse,
-    HealthRequest, HealthResponse, HealthStatus, ListDlqMessagesRequest, ListDlqMessagesResponse,
-    ListSubscribersRequest, ListSubscribersResponse, MessageStatus as ProtoMessageStatus,
-    PublishBatchRequest, PublishBatchResponse, PublishRequest, PublishResponse,
-    RegisterSubscriberRequest, RegisterSubscriberResponse, ReprocessDlqRequest,
+    ComponentHealth, DeliverEvent, DlqMessageInfo, GetMessageStatusRequest,
+    GetMessageStatusResponse, HealthRequest, HealthResponse, HealthStatus, ListDlqMessagesRequest,
+    ListDlqMessagesResponse, ListSubscribersRequest, ListSubscribersResponse,
+    MessageStatus as ProtoMessageStatus, PublishBatchRequest, PublishBatchResponse, PublishRequest,
+    PublishResponse, RegisterSubscriberRequest, RegisterSubscriberResponse, ReprocessDlqRequest,
     ReprocessDlqResponse, SubscribeEventsRequest, SubscriberInfo, UnregisterSubscriberRequest,
     UnregisterSubscriberResponse, UpdateSubscriberRequest, UpdateSubscriberResponse,
 };
@@ -28,20 +29,38 @@ pub struct RsBrokerService {
     outbox_repo: SqlxOutboxRepository,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     subscriber_repo: SqlxSubscriberRepository,
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    dlq_handler: DlqHandler,
+    /// Whether the Kafka producer was successfully constructed.
+    ///
+    /// The service itself does not own the producer, so the flag is set by
+    /// the caller once producer construction completes. A failed construction
+    /// must report `false` so health checks surface the misconfiguration.
+    #[allow(dead_code)]
+    kafka_connected: bool,
     #[cfg(all(not(feature = "postgres"), not(feature = "mysql")))]
     _phantom: std::marker::PhantomData<()>,
 }
 
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 impl RsBrokerService {
-    /// Create a new RsBroker service
+    /// Create a new RsBroker service without a Kafka producer.
+    #[allow(dead_code)]
     pub fn new(db_pool: rs_broker_db::DbPool) -> Self {
+        Self::with_kafka(db_pool, false)
+    }
+
+    /// Create a new RsBroker service with the Kafka health flag.
+    pub fn with_kafka(db_pool: rs_broker_db::DbPool, kafka_connected: bool) -> Self {
         let outbox_repo = SqlxOutboxRepository::new(db_pool.clone());
         let subscriber_repo = SqlxSubscriberRepository::new(db_pool.clone());
+        let dlq_handler = DlqHandler::new(db_pool.clone());
         Self {
             db_pool,
             outbox_repo,
             subscriber_repo,
+            dlq_handler,
+            kafka_connected,
         }
     }
 }
@@ -51,6 +70,7 @@ impl RsBrokerService {
     /// Create a new RsBroker service (stub for when no database features are enabled)
     pub fn new(_db_pool: ()) -> Self {
         Self {
+            kafka_connected: false,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -433,7 +453,7 @@ impl RsBroker for RsBrokerService {
             processed_today: 0,
             dlq_count: 0,
             active_subscribers: subscriber_count,
-            kafka_connected: false, // Would check actual Kafka connection
+            kafka_connected: self.kafka_connected,
             database_connected: db_healthy,
         };
 
@@ -447,21 +467,81 @@ impl RsBroker for RsBrokerService {
     /// Reprocess DLQ messages
     async fn reprocess_dlq(
         &self,
-        _request: Request<ReprocessDlqRequest>,
+        request: Request<ReprocessDlqRequest>,
     ) -> Result<Response<ReprocessDlqResponse>, Status> {
-        // DLQ reprocessing would require more complex setup
-        Err(Status::unimplemented(
-            "DLQ reprocessing not yet implemented",
-        ))
+        let req = request.into_inner();
+
+        let selector = if !req.message_id.is_empty() {
+            let id = Uuid::parse_str(&req.message_id)
+                .map_err(|e| Status::invalid_argument(format!("Invalid message_id: {}", e)))?;
+            DlqSelector::Id(id)
+        } else if !req.topic.is_empty() {
+            DlqSelector::Topic(&req.topic)
+        } else if req.all {
+            DlqSelector::All
+        } else {
+            return Err(Status::invalid_argument(
+                "One of message_id, topic, or all must be specified",
+            ));
+        };
+
+        let result = self
+            .dlq_handler
+            .reprocess(selector, &self.outbox_repo)
+            .await
+            .map_err(|e| Status::internal(format!("Reprocess failed: {}", e)))?;
+
+        Ok(Response::new(ReprocessDlqResponse {
+            reprocessed_count: result.reprocessed_count,
+            failure_count: result.failure_count,
+            errors: result.errors,
+        }))
     }
 
     /// List DLQ messages
     async fn list_dlq_messages(
         &self,
-        _request: Request<ListDlqMessagesRequest>,
+        request: Request<ListDlqMessagesRequest>,
     ) -> Result<Response<ListDlqMessagesResponse>, Status> {
-        // DLQ listing would require more complex setup
-        Err(Status::unimplemented("DLQ listing not yet implemented"))
+        let req = request.into_inner();
+
+        let topic = if req.topic.is_empty() {
+            None
+        } else {
+            Some(req.topic.as_str())
+        };
+        let limit = if req.limit <= 0 { 50 } else { req.limit } as i64;
+        let offset = req.offset as i64;
+
+        let messages = self
+            .dlq_handler
+            .get_messages(topic, limit, offset)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list DLQ messages: {}", e)))?;
+
+        let total_count = self
+            .dlq_handler
+            .count(topic)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to count DLQ messages: {}", e)))?
+            as i32;
+
+        let proto_messages: Vec<DlqMessageInfo> = messages
+            .into_iter()
+            .map(|m| DlqMessageInfo {
+                message_id: m.id.to_string(),
+                original_topic: m.original_topic,
+                dlq_topic: m.dlq_topic,
+                failure_reason: m.failure_reason,
+                retry_count: m.retry_count,
+                created_at: m.created_at.timestamp(),
+            })
+            .collect();
+
+        Ok(Response::new(ListDlqMessagesResponse {
+            messages: proto_messages,
+            total_count,
+        }))
     }
 }
 
@@ -585,7 +665,7 @@ impl RsBroker for RsBrokerService {
             processed_today: 0,
             dlq_count: 0,
             active_subscribers: 0,
-            kafka_connected: false, // Would check actual Kafka connection
+            kafka_connected: self.kafka_connected,
             database_connected: false,
         };
 
