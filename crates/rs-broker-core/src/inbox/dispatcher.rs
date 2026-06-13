@@ -53,7 +53,10 @@ impl Dispatcher {
 
     /// Create a new dispatcher with a SubscriberDispatcher for real gRPC delivery
     #[cfg(any(feature = "postgres", feature = "mysql"))]
-    pub fn with_subscriber_dispatcher(pool: DbPool, subscriber_dispatcher: Arc<SubscriberDispatcher>) -> Self {
+    pub fn with_subscriber_dispatcher(
+        pool: DbPool,
+        subscriber_dispatcher: Arc<SubscriberDispatcher>,
+    ) -> Self {
         let repository = SqlxSubscriberRepository::new(pool);
         Self {
             subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
@@ -110,7 +113,7 @@ impl Dispatcher {
             let request = DeliverRequest {
                 message_id: uuid::Uuid::new_v4().to_string(),
                 topic: topic.to_string(),
-                payload: payload.to_vec().into(),
+                payload: payload.to_vec(),
                 headers: Vec::new(),
                 timestamp: chrono::Utc::now().timestamp(),
                 event_type: String::new(),

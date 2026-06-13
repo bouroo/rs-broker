@@ -29,6 +29,7 @@ impl Default for ChannelPoolConfig {
 /// A pooled channel with metadata
 struct PooledChannel {
     channel: Channel,
+    #[allow(dead_code)]
     created_at: std::time::Instant,
     last_used: std::time::Instant,
 }
@@ -49,8 +50,11 @@ impl PooledChannel {
 }
 
 /// Thread-safe channel pool for gRPC connections
+type EndpointPool = Arc<Mutex<Vec<PooledChannel>>>;
+type PoolsMap = HashMap<String, EndpointPool>;
+
 pub struct ChannelPool {
-    pools: Arc<RwLock<HashMap<String, Arc<Mutex<Vec<PooledChannel>>>>>>,
+    pools: Arc<RwLock<PoolsMap>>,
     config: ChannelPoolConfig,
 }
 

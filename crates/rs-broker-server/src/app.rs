@@ -17,6 +17,7 @@ use rs_broker_kafka::{KafkaConsumer, KafkaProducer};
 use rs_broker_proto::rsbroker::{rs_broker_server::RsBrokerServer, DeliverEvent};
 
 use crate::grpc;
+use crate::metrics::Metrics;
 
 /// Application state holding initialized components
 pub struct App {
@@ -38,6 +39,9 @@ pub struct App {
     /// Broadcast sender for fan-out of DeliverEvents to streaming subscribers.
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     event_sender: tokio::sync::broadcast::Sender<DeliverEvent>,
+    /// Prometheus metrics registry, shared with publishers, consumers, and
+    /// the HTTP `/metrics` handler.
+    metrics: Arc<Metrics>,
 }
 
 /// Builder for constructing the application
@@ -93,8 +97,7 @@ impl AppBuilder {
         // pass false for the connected flag; true health is verified at runtime
         // by the outbox publisher when it actually produces messages.
         #[cfg(any(feature = "postgres", feature = "mysql"))]
-        let grpc_service_inner =
-            grpc::service::RsBrokerService::with_kafka(db_pool.clone(), false);
+        let grpc_service_inner = grpc::service::RsBrokerService::with_kafka(db_pool.clone(), false);
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         let event_sender = grpc_service_inner.event_sender();
 
@@ -104,7 +107,8 @@ impl AppBuilder {
         let grpc_service = RsBrokerServer::new(grpc_service_inner);
 
         // Build the outbox publisher that drains pending messages to Kafka.
-        let publisher = OutboxPublisher::with_producer(db_pool.clone(), producer)?;
+        let publisher =
+            OutboxPublisher::with_producer(db_pool.clone(), producer, settings.retry.clone())?;
 
         // Build the Kafka consumer if topics are configured.
         let consumer = if settings.kafka.consumer.topics.is_empty() {
@@ -150,6 +154,13 @@ impl AppBuilder {
         let http_addr = SocketAddr::from(([0, 0, 0, 0], settings.server.http_port));
         let grpc_addr = SocketAddr::from(([0, 0, 0, 0], settings.grpc.port));
 
+        let metrics = Arc::new(Metrics::new()?);
+        tracing::info!(
+            "Prometheus metrics initialized (enabled={}, path={})",
+            settings.metrics.enabled,
+            settings.metrics.path
+        );
+
         Ok(App {
             settings,
             http_addr,
@@ -158,6 +169,7 @@ impl AppBuilder {
             grpc_service,
             publisher: Some(publisher),
             consumer,
+            metrics,
             #[cfg(any(feature = "postgres", feature = "mysql"))]
             db_pool: db_pool.clone(),
             #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -173,11 +185,26 @@ impl Default for AppBuilder {
 }
 
 impl App {
-    /// Build the HTTP router
-    fn router() -> Router {
-        Router::new()
-            .route("/health", get(health_handler))
-            .layer(TraceLayer::new_for_http())
+    /// Build the HTTP router.
+    ///
+    /// If `metrics_enabled` is true, a `GET` route is registered at
+    /// `metrics_path` that serves the Prometheus text exposition format from
+    /// `metrics`. The endpoint is served on the same HTTP port as the rest of
+    /// the API.
+    fn router(metrics: Arc<Metrics>, metrics_enabled: bool, metrics_path: String) -> Router {
+        let mut router = Router::new().route("/health", get(health_handler));
+
+        if metrics_enabled {
+            router = router.route(
+                &metrics_path,
+                get({
+                    let metrics = Arc::clone(&metrics);
+                    move || metrics_handler(Arc::clone(&metrics))
+                }),
+            );
+        }
+
+        router.layer(TraceLayer::new_for_http())
     }
 
     /// Run the application until shutdown
@@ -196,6 +223,9 @@ impl App {
         let db_pool = self.db_pool;
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         let event_sender = self.event_sender;
+        let metrics = self.metrics;
+        let metrics_enabled = settings.metrics.enabled;
+        let metrics_path = settings.metrics.path.clone();
 
         // Start gRPC server in background
         tokio::spawn(async move {
@@ -236,7 +266,7 @@ impl App {
         let listener = tokio::net::TcpListener::bind(self.http_addr).await?;
         tracing::info!("Starting HTTP server on {}", self.http_addr);
 
-        let app = Self::router();
+        let app = Self::router(metrics, metrics_enabled, metrics_path);
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal(shutdown_tx))
@@ -292,7 +322,12 @@ fn spawn_consumer_loop(
                         .to_string();
 
                     match inbox
-                        .store_message(msg.topic.clone(), msg.partition, msg.offset, payload.clone())
+                        .store_message(
+                            msg.topic.clone(),
+                            msg.partition,
+                            msg.offset,
+                            payload.clone(),
+                        )
                         .await
                     {
                         Ok(id) => {
@@ -333,7 +368,7 @@ fn spawn_consumer_loop(
                         partition: msg.partition,
                         offset: msg.offset,
                         key: msg.key.clone().unwrap_or_default(),
-                        payload: msg.payload.clone().into(),
+                        payload: msg.payload.clone(),
                         headers: Vec::new(),
                         timestamp: chrono::Utc::now().timestamp(),
                         event_type,
@@ -354,6 +389,27 @@ async fn health_handler() -> axum::Json<serde_json::Value> {
         "status": "healthy",
         "version": env!("CARGO_PKG_VERSION")
     }))
+}
+
+/// HTTP handler that serves the Prometheus text exposition format from the
+/// shared [`Metrics`] registry. Returns `500` if encoding fails so monitoring
+/// scrapes can detect a broken exposition pipeline.
+async fn metrics_handler(
+    metrics: Arc<Metrics>,
+) -> Result<
+    (
+        [(axum::http::header::HeaderName, axum::http::HeaderValue); 1],
+        String,
+    ),
+    axum::http::StatusCode,
+> {
+    let body = metrics.render().map_err(|e| {
+        tracing::error!("failed to render metrics: {}", e);
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let content_type = axum::http::HeaderValue::from_static("text/plain; version=0.0.4");
+    Ok(([(axum::http::header::CONTENT_TYPE, content_type)], body))
 }
 
 async fn shutdown_signal(shutdown_tx: broadcast::Sender<()>) {

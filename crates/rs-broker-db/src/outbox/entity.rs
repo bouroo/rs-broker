@@ -165,8 +165,9 @@ mod tests {
             MessageStatus::Dlq,
         ] {
             let s = status.to_string();
-            let parsed: MessageStatus = serde_json::from_value(serde_json::Value::String(s.clone()))
-                .unwrap_or_else(|_| panic!("failed to parse status string: {s}"));
+            let parsed: MessageStatus =
+                serde_json::from_value(serde_json::Value::String(s.clone()))
+                    .unwrap_or_else(|_| panic!("failed to parse status string: {s}"));
             assert_eq!(parsed, status, "round-trip failed for {s}");
         }
     }

@@ -99,6 +99,22 @@ impl OutboxRepository for MockOutboxRepository {
         Ok(pending)
     }
 
+    async fn increment_retry(
+        &self,
+        id: Uuid,
+        error_message: Option<String>,
+    ) -> Result<i32, OutboxError> {
+        let mut guard = self.messages.lock().unwrap();
+        if let Some(msg) = guard.get_mut(&id) {
+            msg.retry_count += 1;
+            msg.status = MessageStatus::Retrying;
+            msg.error_message = error_message;
+            Ok(msg.retry_count)
+        } else {
+            Err(OutboxError::NotFound(id))
+        }
+    }
+
     async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {
         let mut guard = self.messages.lock().unwrap();
         if let Some(msg) = guard.get_mut(&id) {

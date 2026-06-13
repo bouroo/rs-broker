@@ -29,11 +29,12 @@ pub type DbPool = MySqlPool;
 /// Create a database connection pool
 #[cfg(all(feature = "postgres", not(feature = "mysql")))]
 pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
+    let url = config.connection_url();
     let pool = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(Duration::from_secs(config.connection_timeout))
         .max_lifetime(Duration::from_secs(config.max_lifetime))
-        .connect(&config.url)
+        .connect(&url)
         .await?;
 
     Ok(pool)
@@ -42,11 +43,12 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
 /// Create a database connection pool for MariaDB
 #[cfg(all(feature = "mysql", not(feature = "postgres")))]
 pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
+    let url = config.connection_url();
     let pool = MySqlPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(Duration::from_secs(config.connection_timeout))
         .max_lifetime(Duration::from_secs(config.max_lifetime))
-        .connect(&config.url)
+        .connect(&url)
         .await?;
 
     Ok(pool)
@@ -62,7 +64,12 @@ mod tests {
     #[test]
     fn database_config_default_produces_expected_values() {
         let cfg = DatabaseConfig::default();
-        assert_eq!(cfg.url, "postgres://localhost:5432/rsbroker");
+        // url defaults to empty; connection_url() builds from components.
+        assert!(cfg.url.is_empty());
+        assert_eq!(
+            cfg.connection_url(),
+            "postgres://rsbroker@localhost:5432/rsbroker"
+        );
         assert_eq!(cfg.max_connections, 50);
         assert_eq!(cfg.min_idle_connections, Some(10));
         assert_eq!(cfg.connection_timeout, 60);
@@ -72,8 +79,8 @@ mod tests {
     #[test]
     fn default_database_url_returns_expected_string() {
         assert_eq!(
-            DatabaseConfig::default().url,
-            "postgres://localhost:5432/rsbroker"
+            DatabaseConfig::default().connection_url(),
+            "postgres://rsbroker@localhost:5432/rsbroker"
         );
     }
 

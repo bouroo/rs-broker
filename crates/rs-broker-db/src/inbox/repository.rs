@@ -95,12 +95,11 @@ impl InboxRepository for SqlxInboxRepository {
     }
 
     async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError> {
-        let row = sqlx::query_as::<_, InboxMessageRow>(
-            "SELECT * FROM inbox_messages WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_one(&self.pool)
-        .await?;
+        let row =
+            sqlx::query_as::<_, InboxMessageRow>("SELECT * FROM inbox_messages WHERE id = $1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(row.into())
     }

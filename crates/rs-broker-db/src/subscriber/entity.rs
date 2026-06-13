@@ -73,11 +73,7 @@ mod tests {
 
     #[test]
     fn subscriber_topic_patterns_are_stored() {
-        let patterns = vec![
-            "a.b.c".to_string(),
-            "x.y".to_string(),
-            "single".to_string(),
-        ];
+        let patterns = vec!["a.b.c".to_string(), "x.y".to_string(), "single".to_string()];
         let sub = Subscriber::new("svc".into(), "ep".into(), patterns.clone());
         assert_eq!(sub.topic_patterns.len(), 3);
         assert_eq!(sub.topic_patterns, patterns);

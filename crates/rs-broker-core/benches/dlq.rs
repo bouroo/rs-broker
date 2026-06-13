@@ -115,7 +115,8 @@ impl rs_broker_db::dlq::repository::DlqRepository for MockDlqRepository {
 
 /// Helper to create a test DLQ handler
 fn create_test_dlq_handler() -> DlqHandler {
-    let mock_repo = std::sync::Arc::new(MockDlqRepository::new()) as std::sync::Arc<dyn rs_broker_db::dlq::repository::DlqRepository>;
+    let mock_repo = std::sync::Arc::new(MockDlqRepository::new())
+        as std::sync::Arc<dyn rs_broker_db::dlq::repository::DlqRepository>;
     DlqHandler::with_repository(mock_repo)
 }
 

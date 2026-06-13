@@ -161,10 +161,13 @@ pub struct SubscriberEndpoint {
     /// Circuit breaker
     pub circuit_breaker: CircuitBreaker,
     /// Cached channel (if connected)
+    #[allow(dead_code)]
     channel: Option<Channel>,
     /// Channel pool for concurrent requests
+    #[allow(dead_code)]
     channel_pool: Arc<RwLock<Vec<Channel>>>,
     /// Maximum channels in pool
+    #[allow(dead_code)]
     max_channels: usize,
 }
 
@@ -208,6 +211,7 @@ pub struct SubscriberDispatcher {
     /// Subscriber endpoints cache
     endpoints: Arc<RwLock<HashMap<String, SubscriberEndpoint>>>,
     /// Default timeout for deliveries
+    #[allow(dead_code)]
     default_timeout: Duration,
     /// Channel pool for gRPC connections
     channel_pool: Arc<ChannelPool>,
@@ -227,9 +231,7 @@ impl SubscriberDispatcher {
     /// Load subscribers from database
     pub async fn load_subscribers(&self) -> Result<Vec<Subscriber>> {
         let repo = SqlxSubscriberRepository::new(self.db_pool.clone());
-        repo.get_all_active()
-            .await
-            .map_err(|e| Error::from(rs_broker_db::SubscriberError::from(e)))
+        repo.get_all_active().await.map_err(Error::from)
     }
 
     /// Refresh subscriber cache from database
@@ -443,8 +445,6 @@ impl SubscriberDispatcher {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_topic_matching() {
         // topic_matches delegates to matches_pattern which only does string
@@ -471,9 +471,7 @@ mod tests {
     fn match_parts(pattern: &[&str], topic: &[&str]) -> bool {
         match (pattern.first(), topic.first()) {
             (Some(&"*"), _) => true,
-            (Some(&p), Some(&t)) if p == t => {
-                match_parts(&pattern[1..], &topic[1..])
-            }
+            (Some(&p), Some(&t)) if p == t => match_parts(&pattern[1..], &topic[1..]),
             (Some(&p), Some(_)) if p.contains('*') => {
                 let remaining_pattern = &pattern[1..];
                 for i in 0..=topic.len() {

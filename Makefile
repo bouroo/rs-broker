@@ -20,7 +20,7 @@ build-debug:
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
-.PHONY: test test-integration
+.PHONY: test test-integration podman-test
 
 test:
 	@echo "Running workspace tests..."
@@ -29,6 +29,10 @@ test:
 test-integration:
 	@echo "Running rs-broker-server integration tests..."
 	cargo test --package rs-broker-server --test integration_test
+
+podman-test:
+	@echo "Running tests in Podman container..."
+	./scripts/podman-test.sh
 
 # ---------------------------------------------------------------------------
 # Lint & Format

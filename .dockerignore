@@ -1,0 +1,58 @@
+# Rust build artifacts
+target/
+**/target/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# CI/CD and agent artifacts
+.agents/
+.kilo/
+.kilocode/
+.opencode/
+plans/
+
+# Documentation and examples (not needed in build context)
+docs/
+examples/
+deploy/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Cargo lock backup files
+**/*.rs.bk
+
+# Test/coverage artifacts
+*.pdb
+tarpaulin-report.html
+**/mutants.out*/
+
+# Misc
+README.md
+LICENSE
+Makefile
+compose.yml
+compose.test.yml
+Dockerfile
+Containerfile.test
+scripts/
+.ruff_cache/

@@ -8,9 +8,13 @@ mod common;
 use common::TestHarness;
 use rs_broker_db::OutboxRepository;
 use rs_broker_proto::rsbroker::{
-    CancelMessageRequest, GetMessageStatusRequest, ListSubscribersRequest,
-    MessageStatus as ProtoMessageStatus, PublishRequest, RegisterSubscriberRequest,
+    CancelMessageRequest, GetMessageStatusRequest, HealthRequest,
+    HealthStatus as ProtoHealthStatus, ListDlqMessagesRequest, ListSubscribersRequest,
+    MessageStatus as ProtoMessageStatus, PublishBatchRequest, PublishRequest,
+    RegisterSubscriberRequest, SubscribeEventsRequest, UnregisterSubscriberRequest,
+    UpdateSubscriberRequest,
 };
+use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -24,7 +28,11 @@ async fn test_health_endpoint() {
         .await
         .expect("health request failed");
 
-    assert!(resp.status().is_success(), "expected 2xx, got {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "expected 2xx, got {}",
+        resp.status()
+    );
 
     let body: serde_json::Value = resp.json().await.expect("invalid json");
     assert_eq!(body["status"], "healthy");
@@ -186,5 +194,363 @@ async fn test_cancel_message() {
     assert!(
         result.is_err(),
         "expected cancelled message to be removed from outbox"
+    );
+}
+
+#[tokio::test]
+async fn test_publish_batch() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let messages = vec![
+        PublishRequest {
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "batch-1".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: br#"{"id":1}"#.to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        },
+        PublishRequest {
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "batch-2".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: br#"{"id":2}"#.to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        },
+        PublishRequest {
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "batch-3".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: br#"{"id":3}"#.to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        },
+    ];
+
+    let response = client
+        .publish_batch(PublishBatchRequest {
+            messages,
+            ..Default::default()
+        })
+        .await
+        .expect("publish_batch failed")
+        .into_inner();
+
+    assert_eq!(response.success_count, 3, "all 3 messages should succeed");
+    assert_eq!(response.failure_count, 0, "no failures expected");
+    assert_eq!(response.responses.len(), 3);
+
+    for resp in &response.responses {
+        assert!(
+            !resp.message_id.is_empty(),
+            "each response should have a message_id"
+        );
+        assert_eq!(
+            ProtoMessageStatus::try_from(resp.status).unwrap(),
+            ProtoMessageStatus::Pending,
+            "each message should be Pending"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_unregister_subscriber() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let reg_resp = client
+        .register_subscriber(RegisterSubscriberRequest {
+            service_name: "unreg-service".to_string(),
+            grpc_endpoint: "http://localhost:8888".to_string(),
+            topic_patterns: vec!["events.*".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("register_subscriber failed")
+        .into_inner();
+    assert!(reg_resp.success);
+    let subscriber_id = reg_resp.subscriber_id.clone();
+
+    let unreg_resp = client
+        .unregister_subscriber(UnregisterSubscriberRequest {
+            subscriber_id: subscriber_id.clone(),
+            ..Default::default()
+        })
+        .await
+        .expect("unregister_subscriber failed")
+        .into_inner();
+    assert!(
+        unreg_resp.success,
+        "unregister should succeed: {}",
+        unreg_resp.error
+    );
+
+    // After unregistration, listing active subscribers should not include it.
+    let list_resp = client
+        .list_subscribers(ListSubscribersRequest {
+            active_only: true,
+            ..Default::default()
+        })
+        .await
+        .expect("list_subscribers failed")
+        .into_inner();
+
+    let found = list_resp
+        .subscribers
+        .iter()
+        .find(|s| s.subscriber_id == subscriber_id);
+    assert!(
+        found.is_none(),
+        "deactivated subscriber should not appear in active listing"
+    );
+}
+
+#[tokio::test]
+async fn test_update_subscriber() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let reg_resp = client
+        .register_subscriber(RegisterSubscriberRequest {
+            service_name: "update-service".to_string(),
+            grpc_endpoint: "http://localhost:7777".to_string(),
+            topic_patterns: vec!["old.*".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("register_subscriber failed")
+        .into_inner();
+    assert!(reg_resp.success);
+    let subscriber_id = reg_resp.subscriber_id.clone();
+
+    let new_endpoint = "http://localhost:7778";
+    let new_patterns = vec!["new.topic".to_string(), "another.*".to_string()];
+
+    let update_resp = client
+        .update_subscriber(UpdateSubscriberRequest {
+            subscriber_id: subscriber_id.clone(),
+            grpc_endpoint: new_endpoint.to_string(),
+            topic_patterns: new_patterns.clone(),
+            active: true,
+            ..Default::default()
+        })
+        .await
+        .expect("update_subscriber failed")
+        .into_inner();
+    assert!(
+        update_resp.success,
+        "update should succeed: {}",
+        update_resp.error
+    );
+
+    // Verify update by listing.
+    let list_resp = client
+        .list_subscribers(ListSubscribersRequest {
+            active_only: false,
+            ..Default::default()
+        })
+        .await
+        .expect("list_subscribers failed")
+        .into_inner();
+
+    let found = list_resp
+        .subscribers
+        .iter()
+        .find(|s| s.subscriber_id == subscriber_id)
+        .expect("updated subscriber should be in list");
+    assert_eq!(found.grpc_endpoint, new_endpoint);
+    assert_eq!(found.topic_patterns, new_patterns);
+}
+
+#[tokio::test]
+async fn test_grpc_health_check() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let resp = client
+        .get_health(HealthRequest {
+            include_metrics: true,
+        })
+        .await
+        .expect("get_health failed")
+        .into_inner();
+
+    assert_eq!(
+        ProtoHealthStatus::try_from(resp.status).unwrap(),
+        ProtoHealthStatus::Healthy,
+        "broker should report healthy when DB is connected"
+    );
+    assert!(
+        !resp.components.is_empty(),
+        "components list should not be empty"
+    );
+    let metrics = resp
+        .metrics
+        .expect("metrics should be present when include_metrics=true");
+    assert!(
+        metrics.database_connected,
+        "database_connected should be true"
+    );
+}
+
+#[tokio::test]
+async fn test_publish_invalid_uuid() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let result = client
+        .get_message_status(GetMessageStatusRequest {
+            message_id: "not-a-uuid".to_string(),
+            ..Default::default()
+        })
+        .await;
+
+    let status = result.expect_err("expected InvalidArgument error for invalid uuid");
+    assert_eq!(
+        status.code(),
+        tonic::Code::InvalidArgument,
+        "expected InvalidArgument, got {:?}",
+        status.code()
+    );
+}
+
+#[tokio::test]
+async fn test_publish_invalid_payload() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let result = client
+        .publish(PublishRequest {
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "bad-payload".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: b"not json{{{".to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        })
+        .await;
+
+    let status = result.expect_err("expected InvalidArgument error for invalid payload JSON");
+    assert_eq!(
+        status.code(),
+        tonic::Code::InvalidArgument,
+        "expected InvalidArgument, got {:?}",
+        status.code()
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_nonexistent_message() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let nonexistent_id = Uuid::new_v4().to_string();
+
+    let resp = client
+        .cancel_message(CancelMessageRequest {
+            message_id: nonexistent_id,
+            ..Default::default()
+        })
+        .await
+        .expect("cancel_message RPC should not error for nonexistent id")
+        .into_inner();
+
+    assert!(
+        !resp.success,
+        "cancel should report failure for nonexistent message"
+    );
+    assert!(
+        !resp.error.is_empty(),
+        "error message should be populated when message not found"
+    );
+}
+
+#[tokio::test]
+async fn test_idempotent_publish() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let message_id = Uuid::new_v4().to_string();
+
+    let first = client
+        .publish(PublishRequest {
+            message_id: message_id.clone(),
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "idem-1".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: br#"{"id":1}"#.to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("first publish failed")
+        .into_inner();
+    assert_eq!(first.message_id, message_id);
+
+    // Second publish with the same message_id should fail (unique constraint violation).
+    let second = client
+        .publish(PublishRequest {
+            message_id: message_id.clone(),
+            aggregate_type: "Order".to_string(),
+            aggregate_id: "idem-2".to_string(),
+            event_type: "OrderCreated".to_string(),
+            payload: br#"{"id":2}"#.to_vec(),
+            topic: "orders".to_string(),
+            ..Default::default()
+        })
+        .await;
+
+    let err = second
+        .expect_err("second publish with same message_id should fail with unique-constraint error");
+    // The current implementation does not check for duplicates before insert,
+    // so the DB error is surfaced as Status::internal.
+    assert!(
+        err.code() == tonic::Code::Internal || err.code() == tonic::Code::AlreadyExists,
+        "expected Internal or AlreadyExists, got {:?}",
+        err.code()
+    );
+}
+
+#[tokio::test]
+async fn test_list_dlq_empty() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let resp = client
+        .list_dlq_messages(ListDlqMessagesRequest::default())
+        .await
+        .expect("list_dlq_messages failed")
+        .into_inner();
+
+    assert!(
+        resp.messages.is_empty(),
+        "fresh DB should have no DLQ messages"
+    );
+    assert_eq!(resp.total_count, 0, "total_count should be 0");
+}
+
+#[tokio::test]
+async fn test_subscribe_events_stream() {
+    let harness = TestHarness::new().await;
+    let mut client = harness.grpc_client().await;
+
+    let stream_resp = client
+        .subscribe_events(SubscribeEventsRequest {
+            subscriber_id: "test-sub".to_string(),
+            topic_patterns: vec!["orders.*".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("subscribe_events failed");
+    let mut stream = stream_resp.into_inner();
+
+    // No events are being broadcast; verify the stream can be established
+    // and simply times out waiting for the first event.
+    let result = tokio::time::timeout(std::time::Duration::from_millis(500), stream.next()).await;
+    assert!(
+        result.is_err(),
+        "stream should time out without producing events"
     );
 }

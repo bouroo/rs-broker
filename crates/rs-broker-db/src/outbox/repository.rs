@@ -40,6 +40,15 @@ pub trait OutboxRepository: Send + Sync {
         error_message: Option<String>,
     ) -> Result<(), OutboxError>;
 
+    /// Increment retry count, set status to `retrying`, and store the error.
+    ///
+    /// Returns the new retry count.
+    async fn increment_retry(
+        &self,
+        id: Uuid,
+        error_message: Option<String>,
+    ) -> Result<i32, OutboxError>;
+
     /// Mark message as published
     async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError>;
 
@@ -149,7 +158,7 @@ impl OutboxRepository for SqlxOutboxRepository {
 
     async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError> {
         let rows = sqlx::query_as::<_, OutboxMessageRow>(
-            "SELECT * FROM outbox_messages WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1"
+            "SELECT * FROM outbox_messages WHERE status IN ('pending', 'retrying') ORDER BY created_at ASC LIMIT $1"
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -174,6 +183,30 @@ impl OutboxRepository for SqlxOutboxRepository {
         .await?;
 
         Ok(())
+    }
+
+    async fn increment_retry(
+        &self,
+        id: Uuid,
+        error_message: Option<String>,
+    ) -> Result<i32, OutboxError> {
+        let row: (i32,) = sqlx::query_as(
+            r#"
+            UPDATE outbox_messages
+            SET retry_count = retry_count + 1,
+                status = 'retrying',
+                error_message = $1,
+                updated_at = NOW()
+            WHERE id = $2
+            RETURNING retry_count
+            "#,
+        )
+        .bind(&error_message)
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.0)
     }
 
     async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {
@@ -283,7 +316,7 @@ impl OutboxRepository for SqlxOutboxRepository {
 
     async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError> {
         let rows = sqlx::query_as::<_, OutboxMessageRow>(
-            "SELECT * FROM outbox_messages WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?"
+            "SELECT * FROM outbox_messages WHERE status IN ('pending', 'retrying') ORDER BY created_at ASC LIMIT ?"
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -308,6 +341,30 @@ impl OutboxRepository for SqlxOutboxRepository {
         .await?;
 
         Ok(())
+    }
+
+    async fn increment_retry(
+        &self,
+        id: Uuid,
+        error_message: Option<String>,
+    ) -> Result<i32, OutboxError> {
+        let row: (i32,) = sqlx::query_as(
+            r#"
+            UPDATE outbox_messages
+            SET retry_count = retry_count + 1,
+                status = 'retrying',
+                error_message = ?,
+                updated_at = NOW()
+            WHERE id = ?
+            RETURNING retry_count
+            "#,
+        )
+        .bind(&error_message)
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.0)
     }
 
     async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {

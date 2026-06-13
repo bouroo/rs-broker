@@ -1,0 +1,94 @@
+# =============================================================================
+# rs-broker Test Compose
+# =============================================================================
+# Compose file dedicated to running the test suite. Mirrors the infrastructure
+# defined in compose.yml (postgres + Kafka in KRaft mode) but adds a `test`
+# service that builds the test container and runs `cargo test --workspace`.
+#
+# Usage:
+#   podman compose -f compose.test.yml up -d postgres kafka
+#   podman compose -f compose.test.yml run --rm test
+#   podman compose -f compose.test.yml down -v
+#
+# Or use the helper script: ./scripts/podman-test.sh
+# =============================================================================
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 5s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: rs-broker-test-postgres
+    environment:
+      POSTGRES_USER: rsbroker
+      POSTGRES_PASSWORD: rsbroker_dev_password
+      POSTGRES_DB: rsbroker
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U rsbroker -d rsbroker"]
+    networks:
+      - backend
+
+  kafka:
+    image: confluentinc/cp-kafka:8.0.4
+    container_name: rs-broker-test-kafka
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 1
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_test_data:/var/lib/kafka/data
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+    networks:
+      - backend
+
+  test:
+    build:
+      context: .
+      dockerfile: Containerfile.test
+      target: test-runner
+    container_name: rs-broker-test-runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgres://rsbroker:rsbroker_dev_password@postgres:5432/rsbroker
+      TEST_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      RUST_LOG: debug
+    networks:
+      - backend
+
+volumes:
+  postgres_test_data:
+    driver: local
+  kafka_test_data:
+    driver: local
+
+networks:
+  backend:
+    name: rs-broker-test-network
+    driver: bridge

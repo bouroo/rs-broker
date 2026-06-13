@@ -41,7 +41,7 @@ x-database-env: &database-env
 
 x-kafka-env: &kafka-env
   RS_BROKER_KAFKA__BROKERS: kafka:9092
-  RS_BROKER_KAFKA__CONSUMER_GROUP_ID: rs-broker-consumer
+  RS_BROKER_KAFKA__CONSUMER__GROUP_ID: rs-broker-consumer
   RS_BROKER_KAFKA__CLIENT_ID: rs-broker
 
 x-retry-env: &retry-env

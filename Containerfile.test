@@ -1,0 +1,64 @@
+# =============================================================================
+# rs-broker Test Containerfile
+# =============================================================================
+# Multi-stage build for running the Rust test suite inside a container.
+#
+# Stage 1 (builder):    Compiles test binaries with cargo test --no-run
+# Stage 2 (test-runner): Runs cargo test --workspace against postgres + kafka
+#
+# Usage:
+#   podman build -f Containerfile.test -t rs-broker-test:latest .
+#   podman compose -f compose.test.yml run --rm test
+# =============================================================================
+
+ARG RUST_VERSION=1.90
+
+# =============================================================================
+# Stage 1: Builder - compile test binaries
+# =============================================================================
+FROM rust:${RUST_VERSION}-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        protobuf-compiler \
+        ca-certificates \
+        pkg-config \
+        libssl-dev \
+        cmake \
+        make \
+        build-essential \
+        git && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY proto ./proto
+COPY config ./config
+COPY migrations ./migrations
+
+RUN cargo test --workspace --no-run --features postgres
+
+# =============================================================================
+# Stage 2: Test Runner - executes the test suite
+# =============================================================================
+# Reuses the builder image so `cargo test` remains available, but strips the
+# cargo registry, rustup docs, and build-script / incremental caches to keep
+# the final image small enough to commit on a 10GB Podman volume.
+FROM builder AS test-runner
+WORKDIR /app
+
+RUN rm -rf /usr/local/cargo/registry && \
+    rm -rf /usr/local/rustup/toolchains/*/share && \
+    rm -rf /app/target/debug/incremental && \
+    rm -rf /app/target/debug/build
+
+# Connection strings for test dependencies. The harness reads these directly
+# (see crates/rs-broker-server/tests/common/mod.rs) and skips testcontainers
+# when they are set — Docker socket access is not available inside the
+# Podman test container.
+ENV TEST_DATABASE_URL=postgres://rsbroker:rsbroker_dev_password@postgres:5432/rsbroker \
+    TEST_KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
+    RUST_LOG=debug
+
+CMD ["cargo", "test", "--workspace", "--features", "postgres", "--", "--nocapture"]

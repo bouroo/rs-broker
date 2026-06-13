@@ -9,9 +9,7 @@ use rs_broker_db::{
     create_pool, outbox::MessageStatus, DbPool, OutboxMessage, OutboxRepository,
     SqlxOutboxRepository,
 };
-use rs_broker_proto::rsbroker::{
-    rs_broker_server::RsBroker, GetMessageStatusRequest,
-};
+use rs_broker_proto::rsbroker::{rs_broker_server::RsBroker, GetMessageStatusRequest};
 use rs_broker_server::grpc::service::RsBrokerService;
 
 /// Helper to get database URL
@@ -69,8 +67,7 @@ fn bench_get_message_status(c: &mut Criterion) {
 
     let pool = create_test_pool();
     let service = RsBrokerService::new(pool.clone());
-    let message_id =
-        rt.block_on(seed_test_message(pool, MessageStatus::Published));
+    let message_id = rt.block_on(seed_test_message(pool, MessageStatus::Published));
 
     c.bench_function("get_message_status", |b| {
         b.to_async(&rt).iter(|| {

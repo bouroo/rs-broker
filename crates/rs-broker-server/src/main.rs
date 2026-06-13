@@ -4,6 +4,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod app;
 mod grpc;
+mod metrics;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
