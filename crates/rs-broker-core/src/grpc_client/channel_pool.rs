@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tonic::transport::{Channel, Error};
+use tonic::transport::Channel;
 
 /// Configuration for the channel pool
 #[derive(Debug, Clone)]
@@ -64,7 +64,10 @@ impl ChannelPool {
     }
 
     /// Get a channel for the given endpoint, creating one if necessary
-    pub async fn get_channel(&self, endpoint: &str) -> Result<Channel, Error> {
+    pub async fn get_channel(
+        &self,
+        endpoint: &str,
+    ) -> std::result::Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
         // Normalize the endpoint URL
         let normalized_endpoint = self.normalize_endpoint(endpoint);
 
@@ -76,7 +79,7 @@ impl ChannelPool {
 
         if let Some(pool) = endpoint_pool {
             let mut pool_guard = pool.lock().await;
-            
+
             // Remove expired channels
             pool_guard.retain(|ch| !ch.is_expired(self.config.idle_timeout));
 
@@ -110,7 +113,7 @@ impl ChannelPool {
 
         if let Some(pool) = endpoint_pool {
             let mut pool_guard = pool.lock().await;
-            
+
             // Only add back to pool if we haven't exceeded the limit
             if pool_guard.len() < self.config.max_channels_per_endpoint {
                 pool_guard.push(PooledChannel::new(channel));
@@ -121,7 +124,10 @@ impl ChannelPool {
     }
 
     /// Create a new channel to the given endpoint
-    async fn create_channel(&self, endpoint: &str) -> Result<Channel, Error> {
+    async fn create_channel(
+        &self,
+        endpoint: &str,
+    ) -> std::result::Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
         let channel = Channel::from_shared(endpoint.to_string())?
             .connect_timeout(self.config.connect_timeout)
             .connect()

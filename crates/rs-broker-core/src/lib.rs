@@ -5,6 +5,8 @@
 
 pub mod dlq;
 pub mod error;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+pub mod grpc_client;
 pub mod inbox;
 pub mod outbox;
 pub mod subscriber;

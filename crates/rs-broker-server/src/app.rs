@@ -8,11 +8,13 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
-use rs_broker_core::inbox::InboxManager;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+use rs_broker_core::grpc_client::dispatcher::SubscriberDispatcher;
+use rs_broker_core::inbox::{Dispatcher, InboxManager};
 use rs_broker_core::outbox::OutboxPublisher;
 use rs_broker_db::{create_pool, run_migrations};
 use rs_broker_kafka::{KafkaConsumer, KafkaProducer};
-use rs_broker_proto::rsbroker::rs_broker_server::RsBrokerServer;
+use rs_broker_proto::rsbroker::{rs_broker_server::RsBrokerServer, DeliverEvent};
 
 use crate::grpc;
 
@@ -33,6 +35,9 @@ pub struct App {
     /// Database pool for creating additional components at runtime.
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     db_pool: rs_broker_db::DbPool,
+    /// Broadcast sender for fan-out of DeliverEvents to streaming subscribers.
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    event_sender: tokio::sync::broadcast::Sender<DeliverEvent>,
 }
 
 /// Builder for constructing the application
@@ -78,23 +83,23 @@ impl AppBuilder {
         // and the gRPC health check. The producer itself does not establish
         // a connection at construction time; it only validates the config.
         let producer = Arc::new(KafkaProducer::new(&settings.kafka)?);
-        let kafka_connected = true;
         tracing::info!(
             "Kafka producer constructed for {}",
             settings.kafka.bootstrap_servers
         );
 
-        // Build the gRPC service with the Kafka health flag.
+        // Build the gRPC service. The Kafka producer validates its config at
+        // construction time but does not establish a broker connection, so we
+        // pass false for the connected flag; true health is verified at runtime
+        // by the outbox publisher when it actually produces messages.
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         let grpc_service_inner =
-            grpc::service::RsBrokerService::with_kafka(db_pool.clone(), kafka_connected);
+            grpc::service::RsBrokerService::with_kafka(db_pool.clone(), false);
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        let event_sender = grpc_service_inner.event_sender();
 
         #[cfg(not(any(feature = "postgres", feature = "mysql")))]
-        #[allow(unused_variables)]
-        let grpc_service_inner = {
-            let _ = kafka_connected; // not used by the stub build
-            grpc::service::RsBrokerService::new(())
-        };
+        let grpc_service_inner = grpc::service::RsBrokerService::new(());
 
         let grpc_service = RsBrokerServer::new(grpc_service_inner);
 
@@ -155,6 +160,8 @@ impl AppBuilder {
             consumer,
             #[cfg(any(feature = "postgres", feature = "mysql"))]
             db_pool: db_pool.clone(),
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            event_sender,
         })
     }
 }
@@ -187,6 +194,8 @@ impl App {
 
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         let db_pool = self.db_pool;
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        let event_sender = self.event_sender;
 
         // Start gRPC server in background
         tokio::spawn(async move {
@@ -215,8 +224,12 @@ impl App {
         // Start the consumer pipeline if a consumer is available.
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         if let Some(consumer) = consumer {
-            let inbox_mgr = InboxManager::new(db_pool);
-            spawn_consumer_loop(consumer, inbox_mgr);
+            let inbox_mgr = InboxManager::new(db_pool.clone());
+            let dispatcher = {
+                let sd = Arc::new(SubscriberDispatcher::new(db_pool.clone()));
+                Dispatcher::with_subscriber_dispatcher(db_pool, sd)
+            };
+            spawn_consumer_loop(consumer, inbox_mgr, dispatcher, event_sender);
         }
 
         // Start HTTP server (blocks until shutdown)
@@ -241,9 +254,15 @@ impl App {
     }
 }
 
-/// Spawn the consumer loop that reads from Kafka and stores messages in the inbox.
+/// Spawn the consumer loop that reads from Kafka and stores messages in the inbox,
+/// dispatches to subscribers, and broadcasts events for streaming subscribers.
 #[cfg(any(feature = "postgres", feature = "mysql"))]
-fn spawn_consumer_loop(consumer: KafkaConsumer, inbox: InboxManager) {
+fn spawn_consumer_loop(
+    consumer: KafkaConsumer,
+    inbox: InboxManager,
+    dispatcher: Dispatcher,
+    event_sender: tokio::sync::broadcast::Sender<DeliverEvent>,
+) {
     let mut rx = consumer.stream();
 
     tokio::spawn(async move {
@@ -266,8 +285,14 @@ fn spawn_consumer_loop(consumer: KafkaConsumer, inbox: InboxManager) {
                         }
                     };
 
+                    let event_type = payload
+                        .get("event_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
                     match inbox
-                        .store_message(msg.topic.clone(), msg.partition, msg.offset, payload)
+                        .store_message(msg.topic.clone(), msg.partition, msg.offset, payload.clone())
                         .await
                     {
                         Ok(id) => {
@@ -279,8 +304,41 @@ fn spawn_consumer_loop(consumer: KafkaConsumer, inbox: InboxManager) {
                         }
                         Err(e) => {
                             tracing::warn!("Failed to store incoming message: {}", e);
+                            continue;
                         }
                     }
+
+                    // Dispatch to registered gRPC subscribers.
+                    match dispatcher.dispatch(&msg.topic, &msg.payload).await {
+                        Ok(count) => {
+                            tracing::trace!(
+                                "Dispatched message from topic {} to {} subscribers",
+                                msg.topic,
+                                count
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to dispatch message from topic {}: {}",
+                                msg.topic,
+                                e
+                            );
+                        }
+                    }
+
+                    // Broadcast the event for streaming subscribers.
+                    let event = DeliverEvent {
+                        message_id: uuid::Uuid::new_v4().to_string(),
+                        topic: msg.topic.clone(),
+                        partition: msg.partition,
+                        offset: msg.offset,
+                        key: msg.key.clone().unwrap_or_default(),
+                        payload: msg.payload.clone().into(),
+                        headers: Vec::new(),
+                        timestamp: chrono::Utc::now().timestamp(),
+                        event_type,
+                    };
+                    let _ = event_sender.send(event);
                 }
                 Err(e) => {
                     tracing::warn!("Consumer stream error: {}", e);

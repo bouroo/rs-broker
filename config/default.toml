@@ -1,0 +1,87 @@
+# =============================================================================
+# rs-broker Default Configuration
+# =============================================================================
+# This file provides baseline settings. Override via environment variables
+# with RS_BROKER_ prefix or by creating config/{environment}.toml files.
+# =============================================================================
+
+[server]
+mode = "both"
+host = "0.0.0.0"
+http_port = 8080
+grpc_port = 50051
+shutdown_timeout_secs = 30
+request_timeout_secs = 30
+
+[database]
+type = "postgres"
+host = "localhost"
+port = 5432
+username = "rsbroker"
+password = "rsbroker_dev_password"
+database = "rsbroker"
+max_connections = 25
+min_connections = 5
+auto_migrate = true
+
+[kafka]
+brokers = "localhost:9092"
+consumer_group_id = "rs-broker-consumer"
+client_id = "rs-broker"
+security_protocol = "plaintext"
+sasl_mechanism = "PLAIN"
+
+[kafka.producer]
+message_timeout_ms = 30000
+request_timeout_ms = 30000
+acks = -1
+enable_idempotence = true
+compression_type = "snappy"
+batch_size = 16384
+linger_ms = 5
+
+[kafka.consumer]
+enable_auto_commit = false
+auto_commit_interval_ms = 5000
+session_timeout_ms = 30000
+heartbeat_interval_ms = 10000
+max_poll_records = 500
+auto_offset_reset = "latest"
+topics = ["events", "orders"]
+
+[retry]
+max_retries = 5
+initial_delay_ms = 1000
+multiplier = 2.0
+max_delay_ms = 60000
+jitter_factor = 0.1
+
+[dlq]
+enabled = true
+topic_suffix = ".dlq"
+log_messages = true
+
+[outbox]
+poll_interval_ms = 100
+batch_size = 100
+max_concurrent = 10
+retention_days = 7
+
+[inbox]
+max_concurrent_deliveries = 10
+delivery_timeout_ms = 30000
+retention_days = 7
+
+[subscriber]
+default_timeout_ms = 30000
+default_max_retries = 3
+
+[metrics]
+enabled = true
+path = "/metrics"
+port = 9090
+
+[health]
+path = "/health"
+liveness_enabled = true
+readiness_enabled = true

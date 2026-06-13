@@ -48,6 +48,7 @@ pub trait OutboxRepository: Send + Sync {
 }
 
 /// SQLx-based outbox repository
+#[derive(Clone)]
 pub struct SqlxOutboxRepository {
     pool: DbPool,
 }
@@ -67,13 +68,14 @@ impl OutboxRepository for SqlxOutboxRepository {
         sqlx::query(
             r#"
             INSERT INTO outbox_messages (
-                id, aggregate_type, aggregate_id, event_type,
+                id, message_id, aggregate_type, aggregate_id, event_type,
                 payload, headers, topic, partition_key,
                 status, retry_count, error_message,
                 created_at, updated_at, published_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
         )
+        .bind(message.id)
         .bind(message.id)
         .bind(&message.aggregate_type)
         .bind(&message.aggregate_id)
@@ -105,13 +107,14 @@ impl OutboxRepository for SqlxOutboxRepository {
             sqlx::query(
                 r#"
                 INSERT INTO outbox_messages (
-                    id, aggregate_type, aggregate_id, event_type,
+                    id, message_id, aggregate_type, aggregate_id, event_type,
                     payload, headers, topic, partition_key,
                     status, retry_count, error_message,
                     created_at, updated_at, published_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 "#,
             )
+            .bind(message.id)
             .bind(message.id)
             .bind(&message.aggregate_type)
             .bind(&message.aggregate_id)
@@ -135,12 +138,11 @@ impl OutboxRepository for SqlxOutboxRepository {
     }
 
     async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError> {
-        let row = sqlx::query_as::<_, OutboxMessageRow>(
-            "SELECT * FROM outbox_messages WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_one(&self.pool)
-        .await?;
+        let row =
+            sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = $1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(row.into())
     }
@@ -270,10 +272,11 @@ impl OutboxRepository for SqlxOutboxRepository {
     }
 
     async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError> {
-        let row = sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = ?")
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?;
+        let row =
+            sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = ?")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(row.into())
     }

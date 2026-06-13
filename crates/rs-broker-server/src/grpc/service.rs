@@ -1,6 +1,8 @@
 //! gRPC service implementation for RsBroker
 
 use chrono::Utc;
+use futures_util::StreamExt;
+use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -21,6 +23,70 @@ use rs_broker_db::{
     SubscriberRepository,
 };
 
+/// Process a single publish request against the given outbox repository.
+///
+/// This is a free function so it can be called from both the unary `publish`
+/// method and the bidirectional `stream_publish` without needing to clone the
+/// whole service.
+async fn process_publish(
+    outbox_repo: &SqlxOutboxRepository,
+    req: PublishRequest,
+) -> Result<PublishResponse, Status> {
+    let message_id = if req.message_id.is_empty() {
+        Uuid::new_v4().to_string()
+    } else {
+        req.message_id
+    };
+
+    let payload: serde_json::Value = if req.payload.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_slice(&req.payload)
+            .map_err(|e| Status::invalid_argument(format!("Invalid payload JSON: {}", e)))?
+    };
+
+    let headers = if req.headers.is_empty() {
+        None
+    } else {
+        let headers_map: std::collections::HashMap<String, String> = req
+            .headers
+            .iter()
+            .map(|h| (h.key.clone(), h.value.clone()))
+            .collect();
+        serde_json::to_value(headers_map).ok()
+    };
+
+    let mut message = OutboxMessage::new(
+        req.aggregate_type,
+        req.aggregate_id,
+        req.event_type,
+        payload,
+        req.topic,
+    );
+
+    message.id = Uuid::parse_str(&message_id)
+        .map_err(|e| Status::invalid_argument(format!("Invalid message_id: {}", e)))?;
+    message.headers = headers;
+    message.partition_key = if req.partition_key.is_empty() {
+        None
+    } else {
+        Some(req.partition_key)
+    };
+
+    outbox_repo
+        .create(&message)
+        .await
+        .map_err(|e| Status::internal(format!("Failed to create message: {}", e)))?;
+
+    Ok(PublishResponse {
+        message_id,
+        status: ProtoMessageStatus::Pending.into(),
+        duplicate: false,
+        accepted_at: Utc::now().timestamp(),
+        error: String::new(),
+    })
+}
+
 /// RsBroker gRPC service implementation
 pub struct RsBrokerService {
     #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -38,6 +104,8 @@ pub struct RsBrokerService {
     /// must report `false` so health checks surface the misconfiguration.
     #[allow(dead_code)]
     kafka_connected: bool,
+    /// Broadcast channel for fan-out of `DeliverEvent`s to streaming subscribers.
+    event_sender: broadcast::Sender<DeliverEvent>,
     #[cfg(all(not(feature = "postgres"), not(feature = "mysql")))]
     _phantom: std::marker::PhantomData<()>,
 }
@@ -55,13 +123,28 @@ impl RsBrokerService {
         let outbox_repo = SqlxOutboxRepository::new(db_pool.clone());
         let subscriber_repo = SqlxSubscriberRepository::new(db_pool.clone());
         let dlq_handler = DlqHandler::new(db_pool.clone());
+        let (event_sender, _) = broadcast::channel(1024);
         Self {
             db_pool,
             outbox_repo,
             subscriber_repo,
             dlq_handler,
             kafka_connected,
+            event_sender,
         }
+    }
+
+    /// Returns a clone of the broadcast sender.
+    ///
+    /// External components (e.g. publish path, Kafka consumer) can use this to
+    /// broadcast `DeliverEvent`s to all active streaming subscribers.
+    pub fn event_sender(&self) -> broadcast::Sender<DeliverEvent> {
+        self.event_sender.clone()
+    }
+
+    /// Process a single publish request, returning the response or a Status error.
+    async fn publish_single(&self, req: PublishRequest) -> Result<PublishResponse, Status> {
+        process_publish(&self.outbox_repo, req).await
     }
 }
 
@@ -69,8 +152,10 @@ impl RsBrokerService {
 impl RsBrokerService {
     /// Create a new RsBroker service (stub for when no database features are enabled)
     pub fn new(_db_pool: ()) -> Self {
+        let (event_sender, _) = broadcast::channel(1024);
         Self {
             kafka_connected: false,
+            event_sender,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -98,67 +183,7 @@ impl RsBroker for RsBrokerService {
         request: Request<PublishRequest>,
     ) -> Result<Response<PublishResponse>, Status> {
         let req = request.into_inner();
-
-        // Generate message ID if not provided
-        let message_id = if req.message_id.is_empty() {
-            Uuid::new_v4().to_string()
-        } else {
-            req.message_id
-        };
-
-        // Parse payload from bytes to JSON
-        let payload: serde_json::Value = if req.payload.is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_slice(&req.payload)
-                .map_err(|e| Status::invalid_argument(format!("Invalid payload JSON: {}", e)))?
-        };
-
-        // Parse headers
-        let headers = if req.headers.is_empty() {
-            None
-        } else {
-            let headers_map: std::collections::HashMap<String, String> = req
-                .headers
-                .iter()
-                .map(|h| (h.key.clone(), h.value.clone()))
-                .collect();
-            serde_json::to_value(headers_map).ok()
-        };
-
-        // Create outbox message
-        let mut message = OutboxMessage::new(
-            req.aggregate_type,
-            req.aggregate_id,
-            req.event_type,
-            payload,
-            req.topic,
-        );
-
-        // Override with provided values
-        message.id = Uuid::parse_str(&message_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid message_id: {}", e)))?;
-        message.headers = headers;
-        message.partition_key = if req.partition_key.is_empty() {
-            None
-        } else {
-            Some(req.partition_key)
-        };
-
-        // Save to database
-        let repo = &self.outbox_repo;
-        repo.create(&message)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to create message: {}", e)))?;
-
-        let response = PublishResponse {
-            message_id,
-            status: ProtoMessageStatus::Pending.into(),
-            duplicate: false,
-            accepted_at: Utc::now().timestamp(),
-            error: String::new(),
-        };
-
+        let response = self.publish_single(req).await?;
         Ok(Response::new(response))
     }
 
@@ -383,23 +408,92 @@ impl RsBroker for RsBrokerService {
         }))
     }
 
-    /// Subscribe to events (streaming - not fully implemented)
+    /// Subscribe to events (streaming)
     async fn subscribe_events(
         &self,
-        _request: Request<SubscribeEventsRequest>,
+        request: Request<SubscribeEventsRequest>,
     ) -> Result<Response<Self::SubscribeEventsStream>, Status> {
-        // Streaming implementation would require more complex setup
-        let stream: Self::SubscribeEventsStream = Box::pin(futures_util::stream::empty());
-        Ok(Response::new(stream))
+        let req = request.into_inner();
+        let subscriber_id = req.subscriber_id;
+        let patterns = req.topic_patterns;
+
+        if subscriber_id.is_empty() {
+            return Err(Status::invalid_argument("subscriber_id must not be empty"));
+        }
+
+        let receiver = self.event_sender.subscribe();
+
+        let stream =
+            tokio_stream::wrappers::BroadcastStream::new(receiver).filter_map(move |result| {
+                let patterns = patterns.clone();
+                let subscriber_id = subscriber_id.clone();
+                async move {
+                    match result {
+                        Ok(event) => {
+                            if topic_matches(&event.topic, &patterns) {
+                                Some(Ok(event))
+                            } else {
+                                None
+                            }
+                        }
+                        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(
+                            skipped,
+                        )) => {
+                            tracing::warn!(
+                                skipped,
+                                subscriber_id = %subscriber_id,
+                                "subscriber lagged behind broadcast"
+                            );
+                            None
+                        }
+                    }
+                }
+            });
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
-    /// Stream publish (bidirectional streaming - not fully implemented)
+    /// Bidirectional streaming publish: process each incoming PublishRequest
+    /// and return a PublishResponse for each. Individual message failures are
+    /// reported in the response rather than terminating the stream.
     async fn stream_publish(
         &self,
-        _request: Request<tonic::Streaming<PublishRequest>>,
+        request: Request<tonic::Streaming<PublishRequest>>,
     ) -> Result<Response<Self::StreamPublishStream>, Status> {
-        // Streaming implementation would require more complex setup
-        let stream: Self::StreamPublishStream = Box::pin(futures_util::stream::empty());
+        let outbox_repo = self.outbox_repo.clone();
+        let incoming = request.into_inner();
+
+        let output = incoming.then(move |result| {
+            let outbox_repo = outbox_repo.clone();
+            async move {
+                let req = match result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok(PublishResponse {
+                            message_id: String::new(),
+                            status: ProtoMessageStatus::Pending.into(),
+                            duplicate: false,
+                            accepted_at: 0,
+                            error: format!("Stream error: {}", e),
+                        });
+                    }
+                };
+
+                let response = match process_publish(&outbox_repo, req).await {
+                    Ok(resp) => resp,
+                    Err(status) => PublishResponse {
+                        message_id: String::new(),
+                        status: ProtoMessageStatus::Pending.into(),
+                        duplicate: false,
+                        accepted_at: 0,
+                        error: status.message().to_string(),
+                    },
+                };
+                Ok(response)
+            }
+        });
+
+        let stream: Self::StreamPublishStream = Box::pin(output);
         Ok(Response::new(stream))
     }
 
@@ -625,14 +719,12 @@ impl RsBroker for RsBrokerService {
         Err(Status::unimplemented("Database features disabled"))
     }
 
-    /// Subscribe to events (streaming - not fully implemented)
+    /// Subscribe to events (streaming)
     async fn subscribe_events(
         &self,
         _request: Request<SubscribeEventsRequest>,
     ) -> Result<Response<Self::SubscribeEventsStream>, Status> {
-        // Streaming implementation would require more complex setup
-        let stream: Self::SubscribeEventsStream = Box::pin(futures_util::stream::empty());
-        Ok(Response::new(stream))
+        Err(Status::unimplemented("Database features disabled"))
     }
 
     /// Stream publish (bidirectional streaming - not fully implemented)
@@ -691,4 +783,29 @@ impl RsBroker for RsBrokerService {
     ) -> Result<Response<ListDlqMessagesResponse>, Status> {
         Err(Status::unimplemented("Database features disabled"))
     }
+}
+
+/// Check if a topic matches any of the given patterns.
+///
+/// Supports:
+/// - `*` matches everything
+/// - `prefix.*` matches any topic starting with `prefix.`
+/// - Exact string match otherwise
+fn topic_matches(topic: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    for pattern in patterns {
+        if pattern == "*" {
+            return true;
+        }
+        if let Some(prefix) = pattern.strip_suffix(".*") {
+            if topic.starts_with(&format!("{}.", prefix)) {
+                return true;
+            }
+        } else if topic == pattern {
+            return true;
+        }
+    }
+    false
 }

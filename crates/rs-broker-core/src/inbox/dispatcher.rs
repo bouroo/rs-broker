@@ -9,6 +9,12 @@ use crate::error::Result;
 use rs_broker_db::subscriber::repository::SqlxSubscriberRepository;
 use rs_broker_db::{DbPool, Subscriber, SubscriberRepository};
 
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+use crate::grpc_client::dispatcher::SubscriberDispatcher;
+
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+use rs_broker_proto::rsbroker::DeliverRequest;
+
 /// Message dispatcher
 pub struct Dispatcher {
     subscriber_repository: Arc<dyn SubscriberRepository>,
@@ -16,6 +22,9 @@ pub struct Dispatcher {
     pattern_cache: Arc<RwLock<HashMap<String, Vec<Subscriber>>>>, // topic -> vec of matching subscribers
     /// Maximum cache size
     max_cache_size: usize,
+    /// Optional gRPC subscriber dispatcher for real delivery
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    subscriber_dispatcher: Option<Arc<SubscriberDispatcher>>,
 }
 
 impl Dispatcher {
@@ -26,6 +35,8 @@ impl Dispatcher {
             subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
             pattern_cache: Arc::new(RwLock::new(HashMap::new())),
             max_cache_size: 1000, // Maximum entries in the pattern cache
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            subscriber_dispatcher: None,
         }
     }
 
@@ -35,6 +46,20 @@ impl Dispatcher {
             subscriber_repository,
             pattern_cache: Arc::new(RwLock::new(HashMap::new())),
             max_cache_size: 1000,
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            subscriber_dispatcher: None,
+        }
+    }
+
+    /// Create a new dispatcher with a SubscriberDispatcher for real gRPC delivery
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    pub fn with_subscriber_dispatcher(pool: DbPool, subscriber_dispatcher: Arc<SubscriberDispatcher>) -> Self {
+        let repository = SqlxSubscriberRepository::new(pool);
+        Self {
+            subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
+            pattern_cache: Arc::new(RwLock::new(HashMap::new())),
+            max_cache_size: 1000,
+            subscriber_dispatcher: Some(subscriber_dispatcher),
         }
     }
 
@@ -78,15 +103,31 @@ impl Dispatcher {
     }
 
     /// Dispatch a message to all matching subscribers
-    pub async fn dispatch(&self, topic: &str, _payload: &[u8]) -> Result<usize> {
+    pub async fn dispatch(&self, topic: &str, payload: &[u8]) -> Result<usize> {
+        // If a SubscriberDispatcher is configured, use it for real gRPC delivery
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        if let Some(ref sd) = self.subscriber_dispatcher {
+            let request = DeliverRequest {
+                message_id: uuid::Uuid::new_v4().to_string(),
+                topic: topic.to_string(),
+                payload: payload.to_vec().into(),
+                headers: Vec::new(),
+                timestamp: chrono::Utc::now().timestamp(),
+                event_type: String::new(),
+                retry_count: 0,
+            };
+            let results = sd.dispatch_to_all(topic, request).await;
+            let success_count = results.iter().filter(|r| r.success).count();
+            return Ok(success_count);
+        }
+
+        // Fallback: log-only delivery (when no SubscriberDispatcher is set)
         let subscribers = self.get_subscribers(topic).await?;
 
         let mut success_count = 0;
 
         for subscriber in subscribers {
             info!("Dispatching to subscriber: {}", subscriber.grpc_endpoint);
-            // In a real implementation, this would make gRPC calls
-            // to the subscriber's endpoint
             success_count += 1;
         }
 

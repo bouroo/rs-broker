@@ -61,20 +61,16 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         sqlx::query(
             r#"
             INSERT INTO subscribers (
-                id, service_name, grpc_endpoint, topic_patterns,
+                id, subscriber_id, service_name, grpc_endpoint, topic_patterns,
                 active, delivery_config, registered_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
         .bind(subscriber.id)
+        .bind(subscriber.id.to_string())
         .bind(&subscriber.service_name)
         .bind(&subscriber.grpc_endpoint)
-        .bind(
-            serde_json::to_value(&subscriber.topic_patterns).map_err(|e| {
-                tracing::warn!("Failed to serialize topic_patterns: {}", e);
-                SubscriberError::Database(sqlx::Error::Decode(Box::new(e)))
-            })?,
-        )
+        .bind(&subscriber.topic_patterns)
         .bind(subscriber.active)
         .bind(&subscriber.delivery_config)
         .bind(subscriber.registered_at)
@@ -118,12 +114,7 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         )
         .bind(&subscriber.service_name)
         .bind(&subscriber.grpc_endpoint)
-        .bind(
-            serde_json::to_value(&subscriber.topic_patterns).map_err(|e| {
-                tracing::warn!("Failed to serialize topic_patterns: {}", e);
-                SubscriberError::Database(sqlx::Error::Decode(Box::new(e)))
-            })?,
-        )
+        .bind(&subscriber.topic_patterns)
         .bind(subscriber.active)
         .bind(&subscriber.delivery_config)
         .bind(subscriber.id)
@@ -256,6 +247,9 @@ struct SubscriberRow {
     id: Uuid,
     service_name: String,
     grpc_endpoint: String,
+    #[cfg(all(feature = "postgres", not(feature = "mysql")))]
+    topic_patterns: Vec<String>,
+    #[cfg(all(feature = "mysql", not(feature = "postgres")))]
     topic_patterns: serde_json::Value,
     active: bool,
     delivery_config: Option<serde_json::Value>,
@@ -269,6 +263,9 @@ impl From<SubscriberRow> for Subscriber {
             id: row.id,
             service_name: row.service_name,
             grpc_endpoint: row.grpc_endpoint,
+            #[cfg(all(feature = "postgres", not(feature = "mysql")))]
+            topic_patterns: row.topic_patterns,
+            #[cfg(all(feature = "mysql", not(feature = "postgres")))]
             topic_patterns: serde_json::from_value(row.topic_patterns).unwrap_or_default(),
             active: row.active,
             delivery_config: row.delivery_config,

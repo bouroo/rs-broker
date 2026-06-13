@@ -105,3 +105,102 @@ impl OutboxMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outbox_message_new_creates_expected_defaults() {
+        let payload = serde_json::json!({"order_id": "123", "amount": 99.95});
+        let msg = OutboxMessage::new(
+            "Order".to_string(),
+            "order-123".to_string(),
+            "OrderCreated".to_string(),
+            payload.clone(),
+            "orders.created".to_string(),
+        );
+
+        assert_eq!(msg.aggregate_type, "Order");
+        assert_eq!(msg.aggregate_id, "order-123");
+        assert_eq!(msg.event_type, "OrderCreated");
+        assert_eq!(msg.payload, payload);
+        assert_eq!(msg.topic, "orders.created");
+        assert_eq!(msg.status, MessageStatus::Pending);
+        assert_eq!(msg.retry_count, 0);
+        assert!(msg.headers.is_none());
+        assert!(msg.partition_key.is_none());
+        assert!(msg.error_message.is_none());
+        assert!(msg.published_at.is_none());
+        assert_eq!(msg.created_at, msg.updated_at);
+    }
+
+    #[test]
+    fn outbox_message_new_generates_unique_ids() {
+        let a = OutboxMessage::new(
+            "A".into(),
+            "1".into(),
+            "Evt".into(),
+            serde_json::json!({}),
+            "t".into(),
+        );
+        let b = OutboxMessage::new(
+            "A".into(),
+            "1".into(),
+            "Evt".into(),
+            serde_json::json!({}),
+            "t".into(),
+        );
+        assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn message_status_display_round_trips() {
+        for status in [
+            MessageStatus::Pending,
+            MessageStatus::Publishing,
+            MessageStatus::Published,
+            MessageStatus::Retrying,
+            MessageStatus::Failed,
+            MessageStatus::Dlq,
+        ] {
+            let s = status.to_string();
+            let parsed: MessageStatus = serde_json::from_value(serde_json::Value::String(s.clone()))
+                .unwrap_or_else(|_| panic!("failed to parse status string: {s}"));
+            assert_eq!(parsed, status, "round-trip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn message_status_default_is_pending() {
+        assert_eq!(MessageStatus::default(), MessageStatus::Pending);
+    }
+
+    #[test]
+    fn message_status_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Pending).unwrap(),
+            serde_json::json!("pending")
+        );
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Publishing).unwrap(),
+            serde_json::json!("publishing")
+        );
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Published).unwrap(),
+            serde_json::json!("published")
+        );
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Retrying).unwrap(),
+            serde_json::json!("retrying")
+        );
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Failed).unwrap(),
+            serde_json::json!("failed")
+        );
+        assert_eq!(
+            serde_json::to_value(MessageStatus::Dlq).unwrap(),
+            serde_json::json!("dlq")
+        );
+    }
+}

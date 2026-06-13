@@ -75,19 +75,16 @@ ENV RS_BROKER_SERVER__HOST=0.0.0.0
 
 EXPOSE 8080 50051 9090
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/app/rs-broker-server", "--help"] || exit 1
-
 ENTRYPOINT ["/app/rs-broker-server"]
 
 # =============================================================================
-# Stage 5: Alpine Runtime - Debug/Development image with shell
+# Stage 5: Alpine Runtime - Debug/Development image with shell and healthcheck
 # =============================================================================
 FROM alpine:${ALPINE_VERSION} AS runtime-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata wget
 
 RUN addgroup -g 1000 rsbroker && \
     adduser -u 1000 -G rsbroker -s /bin/sh -D rsbroker

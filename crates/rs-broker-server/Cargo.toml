@@ -39,10 +39,14 @@ rs-broker-db = { workspace = true }
 rs-broker-kafka = { workspace = true }
 rs-broker-proto = { workspace = true }
 futures-util = { version = "0.3", default-features = false }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
 tokio = { version = "1.35", features = ["rt", "macros"] }
+testcontainers = "0.23"
+reqwest = { version = "0.12", features = ["json"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 
 [features]
 default = ["postgres"]

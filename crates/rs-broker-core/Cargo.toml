@@ -18,6 +18,8 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 sqlx = { workspace = true }
 
+tonic = { workspace = true }
+
 rs-broker-config = { workspace = true }
 rs-broker-db = { workspace = true }
 rs-broker-kafka = { workspace = true }

@@ -48,3 +48,51 @@ impl Subscriber {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscriber_new_creates_expected_defaults() {
+        let patterns = vec!["orders.*".to_string(), "payments.*".to_string()];
+        let sub = Subscriber::new(
+            "order-service".to_string(),
+            "http://order-service:50051".to_string(),
+            patterns.clone(),
+        );
+
+        assert_eq!(sub.service_name, "order-service");
+        assert_eq!(sub.grpc_endpoint, "http://order-service:50051");
+        assert_eq!(sub.topic_patterns, patterns);
+        assert!(sub.active, "newly created subscriber should be active");
+        assert!(sub.delivery_config.is_none());
+        assert_eq!(sub.registered_at, sub.updated_at);
+        assert_ne!(sub.id, Uuid::nil());
+    }
+
+    #[test]
+    fn subscriber_topic_patterns_are_stored() {
+        let patterns = vec![
+            "a.b.c".to_string(),
+            "x.y".to_string(),
+            "single".to_string(),
+        ];
+        let sub = Subscriber::new("svc".into(), "ep".into(), patterns.clone());
+        assert_eq!(sub.topic_patterns.len(), 3);
+        assert_eq!(sub.topic_patterns, patterns);
+    }
+
+    #[test]
+    fn subscriber_active_defaults_to_true() {
+        let sub = Subscriber::new("svc".into(), "ep".into(), vec![]);
+        assert!(sub.active);
+    }
+
+    #[test]
+    fn subscriber_new_generates_unique_ids() {
+        let a = Subscriber::new("svc".into(), "ep".into(), vec![]);
+        let b = Subscriber::new("svc".into(), "ep".into(), vec![]);
+        assert_ne!(a.id, b.id);
+    }
+}

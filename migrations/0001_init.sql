@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
     message_id UUID NOT NULL UNIQUE,
     topic VARCHAR(255) NOT NULL,
     partition INTEGER NOT NULL,
-    offset BIGINT NOT NULL,
+    "offset" BIGINT NOT NULL,
     
     -- Message content
     key VARCHAR(255),
@@ -101,11 +101,11 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
 -- Indexes for inbox performance
 CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox_messages(status);
 CREATE INDEX IF NOT EXISTS idx_inbox_message_id ON inbox_messages(message_id);
-CREATE INDEX IF NOT EXISTS idx_inbox_topic_partition_offset ON inbox_messages(topic, partition, offset);
+CREATE INDEX IF NOT EXISTS idx_inbox_topic_partition_offset ON inbox_messages(topic, partition, "offset");
 CREATE INDEX IF NOT EXISTS idx_inbox_received_at ON inbox_messages(received_at);
 CREATE INDEX IF NOT EXISTS idx_inbox_status_received ON inbox_messages(status, received_at);
 -- Additional indexes for performance optimization
-CREATE INDEX IF NOT EXISTS idx_inbox_topic_offset ON inbox_messages(topic, offset);
+CREATE INDEX IF NOT EXISTS idx_inbox_topic_offset ON inbox_messages(topic, "offset");
 CREATE INDEX IF NOT EXISTS idx_inbox_status_attempt_count ON inbox_messages(status, attempt_count);
 CREATE INDEX IF NOT EXISTS idx_inbox_timestamp_status ON inbox_messages(timestamp, status);
 

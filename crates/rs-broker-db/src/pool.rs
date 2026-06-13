@@ -54,3 +54,32 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
 
 #[cfg(not(any(feature = "postgres", feature = "mysql")))]
 compile_error!("Either 'postgres' or 'mysql' feature must be enabled");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_config_default_produces_expected_values() {
+        let cfg = DatabaseConfig::default();
+        assert_eq!(cfg.url, "postgres://localhost:5432/rsbroker");
+        assert_eq!(cfg.max_connections, 50);
+        assert_eq!(cfg.min_idle_connections, Some(10));
+        assert_eq!(cfg.connection_timeout, 60);
+        assert_eq!(cfg.max_lifetime, 1800);
+    }
+
+    #[test]
+    fn default_database_url_returns_expected_string() {
+        assert_eq!(
+            DatabaseConfig::default().url,
+            "postgres://localhost:5432/rsbroker"
+        );
+    }
+
+    #[test]
+    fn pool_error_database_displays_cause() {
+        let err = PoolError::Config("missing url".to_string());
+        assert_eq!(err.to_string(), "Configuration error: missing url");
+    }
+}
