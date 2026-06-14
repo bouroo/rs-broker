@@ -296,6 +296,38 @@ psql -U rsbroker -d rsbroker -f migrations/0001_init.sql
 cargo build -p rs-broker-proto
 ```
 
+### Git Hooks
+
+This repo ships local git hooks that run the verify pipeline before commits and pushes.
+
+```bash
+make install-hooks        # symlink scripts/hooks/{pre-commit,pre-push} into .git/hooks
+make install-hooks -- --force   # overwrite existing user-authored hooks (backs them up)
+```
+
+| Hook        | Profile | Stages                                                       |
+| ----------- | ------- | ------------------------------------------------------------ |
+| `pre-commit`| `fast`  | `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo check --workspace --all-targets` |
+| `pre-push`  | `full`  | fast stages + `cargo test --workspace`                       |
+
+Run the pipeline manually outside git:
+
+```bash
+make verify        # full profile (fast + test)
+make verify-fast   # fast profile only
+```
+
+Bypass a hook when you know what you're doing:
+
+```bash
+git commit --no-verify
+git push --no-verify
+```
+
+The hooks are symlinked from `scripts/hooks/` into `.git/hooks/`, so edits to the
+source scripts take effect immediately — no reinstall needed. To uninstall,
+just remove the symlinks from `.git/hooks/`.
+
 ## Deployment
 
 ### Docker

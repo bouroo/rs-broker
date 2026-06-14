@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# git pre-commit hook: run fast verify pipeline.
+set -eu
+
+die() {
+  printf '%s\n' "$1" >&2
+  exit 2
+}
+
+# Resolve symlink (git invokes hook via .git/hooks/<name> symlink path).
+resolve_link() {
+  p=$1
+  while [ -L "$p" ]; do
+    dir=$(cd "$(dirname "$p")" && pwd)
+    link=$(readlink "$p")
+    case "$link" in
+      /*) p=$link ;;
+      *)  p=$dir/$link ;;
+    esac
+  done
+  cd "$(dirname "$p")" && pwd
+}
+
+HOOK_REAL=$(resolve_link "$0")
+REPO_ROOT=$(cd "$HOOK_REAL/../.." && pwd)
+
+if [ ! -f "$REPO_ROOT/Cargo.toml" ]; then
+  die "pre-commit: $REPO_ROOT does not look like the rs-broker repo (no Cargo.toml)"
+fi
+
+printf '== pre-commit: running fast verify ==\n'
+exec "$REPO_ROOT/scripts/verify.sh" fast

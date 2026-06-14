@@ -14,9 +14,11 @@ use rs_broker_proto::rsbroker::{
     RegisterSubscriberRequest, SubscribeEventsRequest, UnregisterSubscriberRequest,
     UpdateSubscriberRequest,
 };
+use serial_test::serial;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
+#[serial]
 #[tokio::test]
 async fn test_health_endpoint() {
     let harness = TestHarness::new().await;
@@ -38,6 +40,7 @@ async fn test_health_endpoint() {
     assert_eq!(body["status"], "healthy");
 }
 
+#[serial]
 #[tokio::test]
 async fn test_publish_message() {
     let harness = TestHarness::new().await;
@@ -79,6 +82,7 @@ async fn test_publish_message() {
     assert_eq!(stored.topic, "orders");
 }
 
+#[serial]
 #[tokio::test]
 async fn test_get_message_status() {
     let harness = TestHarness::new().await;
@@ -116,6 +120,7 @@ async fn test_get_message_status() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_register_subscriber() {
     let harness = TestHarness::new().await;
@@ -156,6 +161,7 @@ async fn test_register_subscriber() {
     assert_eq!(sub.topic_patterns, vec!["orders.*".to_string()]);
 }
 
+#[serial]
 #[tokio::test]
 async fn test_cancel_message() {
     let harness = TestHarness::new().await;
@@ -197,6 +203,7 @@ async fn test_cancel_message() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_publish_batch() {
     let harness = TestHarness::new().await;
@@ -255,6 +262,7 @@ async fn test_publish_batch() {
     }
 }
 
+#[serial]
 #[tokio::test]
 async fn test_unregister_subscriber() {
     let harness = TestHarness::new().await;
@@ -307,6 +315,7 @@ async fn test_unregister_subscriber() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_update_subscriber() {
     let harness = TestHarness::new().await;
@@ -364,6 +373,7 @@ async fn test_update_subscriber() {
     assert_eq!(found.topic_patterns, new_patterns);
 }
 
+#[serial]
 #[tokio::test]
 async fn test_grpc_health_check() {
     let harness = TestHarness::new().await;
@@ -395,6 +405,7 @@ async fn test_grpc_health_check() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_publish_invalid_uuid() {
     let harness = TestHarness::new().await;
@@ -416,6 +427,7 @@ async fn test_publish_invalid_uuid() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_publish_invalid_payload() {
     let harness = TestHarness::new().await;
@@ -441,6 +453,7 @@ async fn test_publish_invalid_payload() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_cancel_nonexistent_message() {
     let harness = TestHarness::new().await;
@@ -467,6 +480,7 @@ async fn test_cancel_nonexistent_message() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_idempotent_publish() {
     let harness = TestHarness::new().await;
@@ -513,6 +527,7 @@ async fn test_idempotent_publish() {
     );
 }
 
+#[serial]
 #[tokio::test]
 async fn test_list_dlq_empty() {
     let harness = TestHarness::new().await;
@@ -531,6 +546,7 @@ async fn test_list_dlq_empty() {
     assert_eq!(resp.total_count, 0, "total_count should be 0");
 }
 
+#[serial]
 #[tokio::test]
 async fn test_subscribe_events_stream() {
     let harness = TestHarness::new().await;

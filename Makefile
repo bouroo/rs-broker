@@ -103,6 +103,23 @@ migrate:
 	@echo "or apply SQL files from migrations/ in order against your target database."
 
 # ---------------------------------------------------------------------------
+# Verify Pipeline
+# ---------------------------------------------------------------------------
+.PHONY: verify verify-fast install-hooks
+
+verify:
+	@echo "Running full verify pipeline (fmt + clippy + check + test)..."
+	./scripts/verify.sh full
+
+verify-fast:
+	@echo "Running fast verify (fmt + clippy + check)..."
+	./scripts/verify.sh fast
+
+install-hooks:
+	@echo "Installing git hooks..."
+	./scripts/install-hooks.sh
+
+# ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
 .PHONY: all
