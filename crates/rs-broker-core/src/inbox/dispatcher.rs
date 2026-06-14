@@ -111,7 +111,7 @@ impl Dispatcher {
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         if let Some(ref sd) = self.subscriber_dispatcher {
             let request = DeliverRequest {
-                message_id: uuid::Uuid::new_v4().to_string(),
+                message_id: uuid::Uuid::now_v7().to_string(),
                 topic: topic.to_string(),
                 payload: payload.to_vec(),
                 headers: Vec::new(),

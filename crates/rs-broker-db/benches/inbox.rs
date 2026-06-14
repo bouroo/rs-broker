@@ -50,7 +50,7 @@ pub fn bench_inbox_create(c: &mut Criterion) {
         });
 
         b.iter(|| {
-            let offset = uuid::Uuid::new_v4().as_u128() as i64;
+            let offset = uuid::Uuid::now_v7().as_u128() as i64;
             let message = create_sample_message("orders.events", 0, offset);
 
             let _ = rt.block_on(async {
@@ -194,7 +194,7 @@ pub fn bench_inbox_concurrent_inserts(c: &mut Criterion) {
                                 let pool = pool.clone();
                                 tokio::spawn(async move {
                                     let offset =
-                                        (uuid::Uuid::new_v4().as_u128() + i as u128) as i64;
+                                        (uuid::Uuid::now_v7().as_u128() + i as u128) as i64;
                                     let message = create_sample_message("orders.events", 0, offset);
                                     let repo = SqlxInboxRepository::new(pool);
                                     repo.create(&message).await.ok();

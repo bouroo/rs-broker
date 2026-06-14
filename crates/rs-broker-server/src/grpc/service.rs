@@ -33,7 +33,7 @@ async fn process_publish(
     req: PublishRequest,
 ) -> Result<PublishResponse, Status> {
     let message_id = if req.message_id.is_empty() {
-        Uuid::new_v4().to_string()
+        Uuid::now_v7().to_string()
     } else {
         req.message_id
     };

@@ -48,14 +48,14 @@ impl MockOutboxRepository {
         let mut guard = self.messages.lock().unwrap();
         for _ in 0..count {
             let message = OutboxMessage {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 aggregate_type: "user".to_string(),
-                aggregate_id: Uuid::new_v4().to_string(),
+                aggregate_id: Uuid::now_v7().to_string(),
                 event_type: "user.created".to_string(),
-                payload: json!({"id": Uuid::new_v4().to_string(), "name": "John"}),
+                payload: json!({"id": Uuid::now_v7().to_string(), "name": "John"}),
                 headers: None,
                 topic: "user.events".to_string(),
-                partition_key: Some(Uuid::new_v4().to_string()),
+                partition_key: Some(Uuid::now_v7().to_string()),
                 status: MessageStatus::Pending,
                 retry_count: 0,
                 error_message: None,
@@ -338,7 +338,7 @@ fn bench_publisher_with_serialization(c: &mut Criterion) {
                 {
                     let mut guard = mock_repo.messages.lock().unwrap();
                     let large_payload = json!({
-                        "id": Uuid::new_v4().to_string(),
+                        "id": Uuid::now_v7().to_string(),
                         "name": "John",
                         "data": (0..1000).map(|i| format!("item_{}", i)).collect::<Vec<_>>(),
                         "nested": {
@@ -351,14 +351,14 @@ fn bench_publisher_with_serialization(c: &mut Criterion) {
                     });
 
                     let message = OutboxMessage {
-                        id: Uuid::new_v4(),
+                        id: Uuid::now_v7(),
                         aggregate_type: "user".to_string(),
-                        aggregate_id: Uuid::new_v4().to_string(),
+                        aggregate_id: Uuid::now_v7().to_string(),
                         event_type: "user.created".to_string(),
                         payload: large_payload,
                         headers: None,
                         topic: "user.events".to_string(),
-                        partition_key: Some(Uuid::new_v4().to_string()),
+                        partition_key: Some(Uuid::now_v7().to_string()),
                         status: MessageStatus::Pending,
                         retry_count: 0,
                         error_message: None,

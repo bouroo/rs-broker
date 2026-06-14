@@ -42,7 +42,7 @@ fn bench_subscribe(c: &mut Criterion) {
         b.to_async(&rt).iter(|| {
             let service = black_box(&service);
             let request = tonic::Request::new(RegisterSubscriberRequest {
-                subscriber_id: Uuid::new_v4().to_string(),
+                subscriber_id: Uuid::now_v7().to_string(),
                 service_name: "test_service".to_string(),
                 grpc_endpoint: "http://localhost:50051".to_string(),
                 topic_patterns: vec!["test.*".to_string()],
@@ -62,7 +62,7 @@ fn bench_unsubscribe(c: &mut Criterion) {
     // First register a subscriber to have something to unregister
     let subscriber_id = rt.block_on(async {
         let request = tonic::Request::new(RegisterSubscriberRequest {
-            subscriber_id: Uuid::new_v4().to_string(),
+            subscriber_id: Uuid::now_v7().to_string(),
             service_name: "test_service_unregister".to_string(),
             grpc_endpoint: "http://localhost:50052".to_string(),
             topic_patterns: vec!["test.unregister".to_string()],
@@ -94,7 +94,7 @@ fn bench_list_subscribers(c: &mut Criterion) {
     rt.block_on(async {
         for i in 0..10 {
             let request = tonic::Request::new(RegisterSubscriberRequest {
-                subscriber_id: Uuid::new_v4().to_string(),
+                subscriber_id: Uuid::now_v7().to_string(),
                 service_name: format!("test_service_{}", i),
                 grpc_endpoint: format!("http://localhost:{}", 50050 + i),
                 topic_patterns: vec![format!("test.topic.{}", i)],
@@ -126,7 +126,7 @@ fn bench_update_subscriber(c: &mut Criterion) {
     // First register a subscriber to update
     let subscriber_id = rt.block_on(async {
         let request = tonic::Request::new(RegisterSubscriberRequest {
-            subscriber_id: Uuid::new_v4().to_string(),
+            subscriber_id: Uuid::now_v7().to_string(),
             service_name: "test_service_update".to_string(),
             grpc_endpoint: "http://localhost:50053".to_string(),
             topic_patterns: vec!["test.update".to_string()],

@@ -459,7 +459,7 @@ async fn test_cancel_nonexistent_message() {
     let harness = TestHarness::new().await;
     let mut client = harness.grpc_client().await;
 
-    let nonexistent_id = Uuid::new_v4().to_string();
+    let nonexistent_id = Uuid::now_v7().to_string();
 
     let resp = client
         .cancel_message(CancelMessageRequest {
@@ -486,7 +486,7 @@ async fn test_idempotent_publish() {
     let harness = TestHarness::new().await;
     let mut client = harness.grpc_client().await;
 
-    let message_id = Uuid::new_v4().to_string();
+    let message_id = Uuid::now_v7().to_string();
 
     let first = client
         .publish(PublishRequest {

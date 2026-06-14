@@ -37,7 +37,7 @@ impl Subscriber {
     pub fn new(service_name: String, grpc_endpoint: String, topic_patterns: Vec<String>) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             service_name,
             grpc_endpoint,
             topic_patterns,

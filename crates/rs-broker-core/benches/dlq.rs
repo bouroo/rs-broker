@@ -26,8 +26,8 @@ impl MockDlqRepository {
         let mut guard = self.messages.lock().unwrap();
         for i in 0..count {
             let message = DlqMessage {
-                id: Uuid::new_v4(),
-                original_message_id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
+                original_message_id: Uuid::now_v7(),
                 original_topic: format!("topic_{}", i % 10), // Distribute across 10 topics
                 dlq_topic: "dlq.main".to_string(),
                 failure_reason: format!("Simulated failure {}", i),
@@ -130,7 +130,7 @@ fn bench_dlq_move_message(c: &mut Criterion) {
             let _ = rt.block_on(async {
                 let result = handler
                     .move_to_dlq(
-                        Uuid::new_v4(),
+                        Uuid::now_v7(),
                         "user.events".to_string(),
                         "dlq.user".to_string(),
                         "Simulated failure".to_string(),
@@ -158,7 +158,7 @@ fn bench_dlq_move_batch(c: &mut Criterion) {
                     for i in 0..count {
                         let _ = handler
                             .move_to_dlq(
-                                Uuid::new_v4(),
+                                Uuid::now_v7(),
                                 format!("topic_{}", i % 5),
                                 "dlq.main".to_string(),
                                 format!("Simulated failure {}", i),
@@ -264,7 +264,7 @@ fn bench_dlq_delete(c: &mut Criterion) {
         // Add a message and get its ID
         let id = handler
             .move_to_dlq(
-                Uuid::new_v4(),
+                Uuid::now_v7(),
                 "user.events".to_string(),
                 "dlq.user".to_string(),
                 "Simulated failure".to_string(),
@@ -284,7 +284,7 @@ fn bench_dlq_delete(c: &mut Criterion) {
                 let temp_handler = create_test_dlq_handler();
                 let temp_id = temp_handler
                     .move_to_dlq(
-                        Uuid::new_v4(),
+                        Uuid::now_v7(),
                         "user.events".to_string(),
                         "dlq.user".to_string(),
                         "Simulated failure".to_string(),

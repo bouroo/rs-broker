@@ -101,7 +101,7 @@ impl DlqHandler {
 
         for dlq_msg in &messages {
             let outbox_msg = OutboxMessage {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 aggregate_type: "reprocess".to_string(),
                 aggregate_id: dlq_msg.original_message_id.to_string(),
                 event_type: "reprocessed".to_string(),

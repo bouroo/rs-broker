@@ -154,9 +154,9 @@ fn bench_manager_create_message_batch(c: &mut Criterion) {
                         let _ = manager
                             .create_message(
                                 "user".to_string(),
-                                Uuid::new_v4().to_string(),
+                                Uuid::now_v7().to_string(),
                                 "user.created".to_string(),
-                                json!({"id": Uuid::new_v4().to_string(), "name": "John"}),
+                                json!({"id": Uuid::now_v7().to_string(), "name": "John"}),
                                 "user.events".to_string(),
                             )
                             .await;

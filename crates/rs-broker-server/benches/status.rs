@@ -36,7 +36,7 @@ fn create_test_pool() -> DbPool {
 // Helper function to seed a test message in the database
 async fn seed_test_message(pool: DbPool, status: MessageStatus) -> String {
     let repo = SqlxOutboxRepository::new(pool);
-    let message_id = Uuid::new_v4();
+    let message_id = Uuid::now_v7();
 
     let message = OutboxMessage {
         id: message_id,

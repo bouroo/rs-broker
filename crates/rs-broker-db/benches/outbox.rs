@@ -38,10 +38,10 @@ pub fn bench_outbox_create(c: &mut Criterion) {
         b.iter(|| {
             let message = OutboxMessage::new(
                 "Order".to_string(),
-                uuid::Uuid::new_v4().to_string(),
+                uuid::Uuid::now_v7().to_string(),
                 "OrderCreated".to_string(),
                 serde_json::json!({
-                    "order_id": uuid::Uuid::new_v4().to_string(),
+                    "order_id": uuid::Uuid::now_v7().to_string(),
                     "amount": 100.0,
                     "currency": "USD"
                 }),
@@ -236,7 +236,7 @@ pub fn bench_outbox_batch_insert(c: &mut Criterion) {
                         for i in 0..size {
                             let message = OutboxMessage::new(
                                 "Order".to_string(),
-                                format!("batch-{}-{}", uuid::Uuid::new_v4(), i),
+                                format!("batch-{}-{}", uuid::Uuid::now_v7(), i),
                                 "OrderCreated".to_string(),
                                 serde_json::json!({"order_id": i}),
                                 "orders.events".to_string(),

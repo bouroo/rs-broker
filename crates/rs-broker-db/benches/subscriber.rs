@@ -246,7 +246,7 @@ pub fn bench_subscriber_crud(c: &mut Criterion) {
 
         b.iter(|| {
             let sub = create_sample_subscriber(
-                &format!("crud-{}", uuid::Uuid::new_v4()),
+                &format!("crud-{}", uuid::Uuid::now_v7()),
                 vec!["test.*".to_string()],
             );
             let id = sub.id;

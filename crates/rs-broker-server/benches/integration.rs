@@ -35,7 +35,7 @@ fn create_test_service() -> RsBrokerService {
 // Helper function to create a sample publish request
 fn create_publish_request() -> PublishRequest {
     PublishRequest {
-        message_id: Uuid::new_v4().to_string(),
+        message_id: Uuid::now_v7().to_string(),
         aggregate_type: "integration_test".to_string(),
         aggregate_id: "integration_id".to_string(),
         event_type: "integration_event".to_string(),
@@ -96,7 +96,7 @@ fn bench_full_consume_flow(c: &mut Criterion) {
             // Register a subscriber
             let register_request =
                 tonic::Request::new(rs_broker_proto::rsbroker::RegisterSubscriberRequest {
-                    subscriber_id: Uuid::new_v4().to_string(),
+                    subscriber_id: Uuid::now_v7().to_string(),
                     service_name: "consumer_simulation".to_string(),
                     grpc_endpoint: "http://localhost:50060".to_string(),
                     topic_patterns: vec!["integration_topic".to_string()],

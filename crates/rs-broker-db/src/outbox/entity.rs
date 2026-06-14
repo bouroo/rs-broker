@@ -88,7 +88,7 @@ impl OutboxMessage {
     ) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             aggregate_type,
             aggregate_id,
             event_type,

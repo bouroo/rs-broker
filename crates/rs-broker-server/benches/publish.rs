@@ -37,7 +37,7 @@ fn create_test_service() -> RsBrokerService {
 fn create_publish_request(payload_size: usize) -> PublishRequest {
     let payload = vec![b'a'; payload_size];
     PublishRequest {
-        message_id: Uuid::new_v4().to_string(),
+        message_id: Uuid::now_v7().to_string(),
         aggregate_type: "test_aggregate".to_string(),
         aggregate_id: "test_id".to_string(),
         event_type: "test_event".to_string(),

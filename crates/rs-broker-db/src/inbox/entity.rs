@@ -78,7 +78,7 @@ impl InboxMessage {
     pub fn new(topic: String, partition: i32, offset: i64, payload: serde_json::Value) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             topic,
             partition,
             offset,

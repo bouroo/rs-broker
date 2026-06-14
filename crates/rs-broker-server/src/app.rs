@@ -363,7 +363,7 @@ fn spawn_consumer_loop(
 
                     // Broadcast the event for streaming subscribers.
                     let event = DeliverEvent {
-                        message_id: uuid::Uuid::new_v4().to_string(),
+                        message_id: uuid::Uuid::now_v7().to_string(),
                         topic: msg.topic.clone(),
                         partition: msg.partition,
                         offset: msg.offset,

@@ -430,7 +430,7 @@ fn bench_registry_add(c: &mut Criterion) {
             || {
                 // Create a new subscriber for each iteration
                 Subscriber::new(
-                    format!("service_{}", Uuid::new_v4()),
+                    format!("service_{}", Uuid::now_v7()),
                     format!("grpc://localhost:{}", 5000 + (rand::random::<u16>() % 1000)),
                     vec![format!("topic_{}", rand::random::<u32>() % 100)],
                 )
@@ -454,7 +454,7 @@ fn bench_registry_remove(c: &mut Criterion) {
         let subs = InMemorySubscribers::new();
         for _ in 0..1000 {
             let subscriber = Subscriber::new(
-                format!("service_{}", Uuid::new_v4()),
+                format!("service_{}", Uuid::now_v7()),
                 format!("grpc://localhost:{}", 5000 + (rand::random::<u16>() % 1000)),
                 vec![format!("topic_{}", rand::random::<u32>() % 100)],
             );
@@ -468,7 +468,7 @@ fn bench_registry_remove(c: &mut Criterion) {
             || {
                 // Get a random subscriber ID to remove
                 let all_subs = rt.block_on(subscribers.get_all_active());
-                all_subs.first().map(|s| s.id).unwrap_or_else(Uuid::new_v4)
+                all_subs.first().map(|s| s.id).unwrap_or_else(Uuid::now_v7)
             },
             |id| {
                 rt.block_on(async {

@@ -46,7 +46,7 @@ impl DlqMessage {
         payload: serde_json::Value,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             original_message_id,
             original_topic,
             dlq_topic,
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn dlq_message_new_creates_expected_values() {
-        let original_id = Uuid::new_v4();
+        let original_id = Uuid::now_v7();
         let payload = serde_json::json!({"order": 42});
         let before = Utc::now();
 
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn dlq_message_round_trips_serde() {
-        let original_id = Uuid::new_v4();
+        let original_id = Uuid::now_v7();
         let msg = DlqMessage::new(
             original_id,
             "src".to_string(),
