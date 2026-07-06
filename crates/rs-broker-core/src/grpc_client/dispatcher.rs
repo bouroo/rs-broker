@@ -11,6 +11,7 @@ use tonic::Status;
 use super::channel_pool::{ChannelPool, ChannelPoolConfig};
 
 use crate::error::{Error, Result};
+use crate::topic::matches_any;
 use rs_broker_db::{DbPool, SqlxSubscriberRepository, Subscriber, SubscriberRepository};
 use rs_broker_proto::rsbroker::{
     rs_broker_callback_client::RsBrokerCallbackClient, DeliverRequest, DeliverResponse,
@@ -256,72 +257,9 @@ impl SubscriberDispatcher {
 
         endpoints
             .values()
-            .filter(|e| self.topic_matches(&e.subscriber.topic_patterns, topic))
+            .filter(|e| matches_any(topic, &e.subscriber.topic_patterns))
             .map(|e| e.subscriber.clone())
             .collect()
-    }
-
-    /// Check if topic matches any of the patterns
-    fn topic_matches(&self, patterns: &[String], topic: &str) -> bool {
-        for pattern in patterns {
-            if self.matches_pattern(pattern, topic) {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Simple wildcard matching (supports * and ?)
-    fn matches_pattern(&self, pattern: &str, topic: &str) -> bool {
-        // Exact match
-        if pattern == topic {
-            return true;
-        }
-
-        // Wildcard matching
-        let pattern_parts: Vec<&str> = pattern.split('.').collect();
-        let topic_parts: Vec<&str> = topic.split('.').collect();
-
-        self.match_parts(&pattern_parts, &topic_parts)
-    }
-
-    fn match_parts(&self, pattern: &[&str], topic: &[&str]) -> bool {
-        match (pattern.first(), topic.first()) {
-            (Some(&"*"), _) => {
-                // * matches anything
-                true
-            }
-            (Some(p), Some(t)) if p == t => {
-                // Parts match, continue
-                self.match_parts(&pattern[1..], &topic[1..])
-            }
-            (Some(p), Some(_)) if p.contains('*') => {
-                // Pattern has wildcard, try to match
-                let remaining_pattern = &pattern[1..];
-                for i in 0..=topic.len() {
-                    if self.match_parts(remaining_pattern, &topic[i..]) {
-                        return true;
-                    }
-                }
-                false
-            }
-            (Some(_), Some(_)) => {
-                // Parts don't match
-                false
-            }
-            (None, None) => {
-                // Both exhausted
-                true
-            }
-            (None, Some(_)) => {
-                // Pattern exhausted but topic has more parts
-                false
-            }
-            (Some(_), None) => {
-                // Topic exhausted but pattern has more parts
-                false
-            }
-        }
     }
 
     /// Dispatch a message to a subscriber
@@ -440,51 +378,5 @@ impl SubscriberDispatcher {
         }
 
         results
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_topic_matching() {
-        // topic_matches delegates to matches_pattern which only does string
-        // comparison — no DB needed. However, SubscriberDispatcher::new requires
-        // a real pool. We test via an inert struct that reuses the same logic.
-        //
-        // The logic under test is entirely stateless, so we verify by calling
-        // the private methods through a minimal helper.
-        assert!(matches_pattern("orders.created", "orders.created"));
-        assert!(matches_pattern("orders.created", "orders.*"));
-        assert!(matches_pattern("orders.updated", "orders.*"));
-        assert!(!matches_pattern("payments.created", "orders.created"));
-    }
-
-    fn matches_pattern(topic: &str, pattern: &str) -> bool {
-        if pattern == topic {
-            return true;
-        }
-        let pattern_parts: Vec<&str> = pattern.split('.').collect();
-        let topic_parts: Vec<&str> = topic.split('.').collect();
-        match_parts(&pattern_parts, &topic_parts)
-    }
-
-    fn match_parts(pattern: &[&str], topic: &[&str]) -> bool {
-        match (pattern.first(), topic.first()) {
-            (Some(&"*"), _) => true,
-            (Some(&p), Some(&t)) if p == t => match_parts(&pattern[1..], &topic[1..]),
-            (Some(&p), Some(_)) if p.contains('*') => {
-                let remaining_pattern = &pattern[1..];
-                for i in 0..=topic.len() {
-                    if match_parts(remaining_pattern, &topic[i..]) {
-                        return true;
-                    }
-                }
-                false
-            }
-            (Some(_), Some(_)) => false,
-            (None, None) => true,
-            (None, Some(_)) => false,
-            (Some(_), None) => false,
-        }
     }
 }

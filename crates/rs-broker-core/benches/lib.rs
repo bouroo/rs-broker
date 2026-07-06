@@ -3,25 +3,12 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_core::inbox::dedup::Deduplicator;
+use rs_broker_core::topic::matches_topic;
 use rs_broker_db::Subscriber;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-
-/// Helper function to simulate subscriber pattern matching (copied from dispatcher)
-fn matches_topic(topic: &str, pattern: &str) -> bool {
-    if pattern.contains('*') {
-        // Simple wildcard matching
-        let prefix = pattern.trim_end_matches('*');
-        topic.starts_with(prefix)
-    } else if pattern.contains('>') {
-        // MQTT-style wildcard (not implemented)
-        false
-    } else {
-        topic == pattern
-    }
-}
 
 /// Helper to create a test deduplicator
 fn create_test_deduplicator(max_size: usize) -> Arc<Deduplicator> {
@@ -508,14 +495,9 @@ fn bench_registry_get_by_topic(c: &mut Criterion) {
                 let matching: Vec<Subscriber> = all_subs
                     .into_iter()
                     .filter(|s| {
-                        s.topic_patterns.iter().any(|pattern| {
-                            if pattern.contains('*') {
-                                let prefix = pattern.trim_end_matches('*');
-                                topic.starts_with(prefix)
-                            } else {
-                                topic == *pattern
-                            }
-                        })
+                        s.topic_patterns
+                            .iter()
+                            .any(|pattern| matches_topic(topic, pattern))
                     })
                     .collect();
 

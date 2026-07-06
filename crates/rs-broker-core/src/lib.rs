@@ -10,6 +10,7 @@ pub mod grpc_client;
 pub mod inbox;
 pub mod outbox;
 pub mod subscriber;
+pub mod topic;
 
 pub use dlq::{DlqHandler, DlqSelector, ReprocessResult};
 pub use error::{Error, Result};
@@ -17,3 +18,4 @@ pub use inbox::InboxManager;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 pub use outbox::OutboxManager;
 pub use subscriber::SubscriberRegistry;
+pub use topic::{matches_any, matches_topic};
