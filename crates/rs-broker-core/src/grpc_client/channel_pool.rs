@@ -166,4 +166,13 @@ mod tests {
         let pool = ChannelPool::default();
         assert_eq!(pool.config.max_channels_per_endpoint, 10);
     }
+
+    // Note: a unit test that proves `put_channel` + `get_channel` actually
+    // reuses a `Channel` is intentionally omitted. `get_channel` falls through
+    // to a real `Channel::connect()` (DNS + TCP) whenever the pool for an
+    // endpoint is empty, so a true reuse assertion would require a live
+    // endpoint. The dispatcher-level fix (clone before use, `put_channel`
+    // after, on success and error) is verified by the existing integration
+    // tests and by the `SubscriberDispatcher::deliver_to_endpoint` change in
+    // this unit.
 }

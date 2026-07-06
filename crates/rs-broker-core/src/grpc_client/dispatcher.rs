@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
-use tonic::transport::Channel;
 use tonic::Status;
 
 use super::channel_pool::{ChannelPool, ChannelPoolConfig};
@@ -52,8 +51,6 @@ pub struct CircuitBreakerConfig {
     pub success_threshold: u32,
     /// Duration to wait before trying half-open
     pub open_duration: Duration,
-    /// Timeout for requests
-    pub request_timeout: Duration,
 }
 
 impl Default for CircuitBreakerConfig {
@@ -62,7 +59,6 @@ impl Default for CircuitBreakerConfig {
             failure_threshold: 5,
             success_threshold: 2,
             open_duration: Duration::from_secs(30),
-            request_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -161,15 +157,6 @@ pub struct SubscriberEndpoint {
     pub subscriber: Subscriber,
     /// Circuit breaker
     pub circuit_breaker: CircuitBreaker,
-    /// Cached channel (if connected)
-    #[allow(dead_code)]
-    channel: Option<Channel>,
-    /// Channel pool for concurrent requests
-    #[allow(dead_code)]
-    channel_pool: Arc<RwLock<Vec<Channel>>>,
-    /// Maximum channels in pool
-    #[allow(dead_code)]
-    max_channels: usize,
 }
 
 impl SubscriberEndpoint {
@@ -178,9 +165,6 @@ impl SubscriberEndpoint {
         Self {
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             subscriber,
-            channel: None,
-            channel_pool: Arc::new(RwLock::new(Vec::new())),
-            max_channels: 5, // Default max channels in pool
         }
     }
 
@@ -211,9 +195,8 @@ pub struct SubscriberDispatcher {
     db_pool: DbPool,
     /// Subscriber endpoints cache
     endpoints: Arc<RwLock<HashMap<String, SubscriberEndpoint>>>,
-    /// Default timeout for deliveries
-    #[allow(dead_code)]
-    default_timeout: Duration,
+    /// Timeout for individual delivery requests
+    request_timeout: Duration,
     /// Channel pool for gRPC connections
     channel_pool: Arc<ChannelPool>,
 }
@@ -224,7 +207,7 @@ impl SubscriberDispatcher {
         Self {
             db_pool,
             endpoints: Arc::new(RwLock::new(HashMap::new())),
-            default_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(10),
             channel_pool: Arc::new(ChannelPool::new(ChannelPoolConfig::default())),
         }
     }
@@ -292,9 +275,8 @@ impl SubscriberDispatcher {
         };
 
         // Deliver with timeout (lock released during I/O)
-        let timeout_duration = Duration::from_secs(10);
         let result = timeout(
-            timeout_duration,
+            self.request_timeout,
             self.deliver_to_endpoint(&endpoint_addr, request),
         )
         .await;
@@ -356,11 +338,18 @@ impl SubscriberDispatcher {
             .await
             .map_err(|e| Status::unavailable(format!("Failed to get channel: {}", e)))?;
 
-        let mut client = RsBrokerCallbackClient::new(channel);
+        // Clone for the client; the original is returned to the pool afterwards.
+        // Channel::clone is cheap (Arc-based internal pool).
+        let mut client = RsBrokerCallbackClient::new(channel.clone());
 
-        let response = client.deliver(request).await.map(|r| r.into_inner());
+        let result = client.deliver(request).await.map(|r| r.into_inner());
 
-        response
+        // Return the channel for reuse regardless of outcome. Tonic's Channel
+        // handles reconnection internally, so even a failed call's channel can
+        // be retried on the next delivery.
+        let _ = self.channel_pool.put_channel(endpoint, channel).await;
+
+        result
     }
 
     /// Dispatch to all matching subscribers
