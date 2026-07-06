@@ -43,14 +43,6 @@ impl std::fmt::Debug for OutboxManager {
 impl OutboxManager {
     /// Create a new outbox manager
     pub fn new(pool: DbPool, retry_config: RetryConfig) -> Self {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        let repository = {
-            use rs_broker_db::outbox::repository::SqlxOutboxRepository;
-            std::sync::Arc::new(SqlxOutboxRepository::new(pool))
-                as std::sync::Arc<dyn OutboxRepository>
-        };
-
-        #[cfg(all(feature = "mysql", not(feature = "postgres")))]
         let repository = {
             use rs_broker_db::outbox::repository::SqlxOutboxRepository;
             std::sync::Arc::new(SqlxOutboxRepository::new(pool))

@@ -29,8 +29,6 @@ impl Default for ChannelPoolConfig {
 /// A pooled channel with metadata
 struct PooledChannel {
     channel: Channel,
-    #[allow(dead_code)]
-    created_at: std::time::Instant,
     last_used: std::time::Instant,
 }
 
@@ -39,7 +37,6 @@ impl PooledChannel {
         let now = std::time::Instant::now();
         Self {
             channel,
-            created_at: now,
             last_used: now,
         }
     }
@@ -122,6 +119,17 @@ impl ChannelPool {
             if pool_guard.len() < self.config.max_channels_per_endpoint {
                 pool_guard.push(PooledChannel::new(channel));
             }
+        } else {
+            // No pool for this endpoint yet — create one and store the channel.
+            let new_pool = Arc::new(Mutex::new(Vec::new()));
+            {
+                let mut pool_guard = new_pool.lock().await;
+                if pool_guard.len() < self.config.max_channels_per_endpoint {
+                    pool_guard.push(PooledChannel::new(channel));
+                }
+            }
+            let mut pools = self.pools.write().await;
+            pools.insert(normalized_endpoint, new_pool);
         }
 
         Ok(())
@@ -158,6 +166,23 @@ impl Default for ChannelPool {
 }
 
 #[cfg(test)]
+impl ChannelPool {
+    /// Test-only: number of pooled channels currently stored for `endpoint`
+    /// (0 if no pool exists for that endpoint).
+    async fn pool_size(&self, endpoint: &str) -> usize {
+        let normalized = self.normalize_endpoint(endpoint);
+        let pools = self.pools.read().await;
+        match pools.get(&normalized) {
+            Some(pool) => {
+                let guard = pool.lock().await;
+                guard.len()
+            }
+            None => 0,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -165,6 +190,28 @@ mod tests {
     async fn test_channel_pool_creation() {
         let pool = ChannelPool::default();
         assert_eq!(pool.config.max_channels_per_endpoint, 10);
+    }
+
+    #[tokio::test]
+    async fn test_put_channel_creates_missing_pool() {
+        // Regression: previously, returning a channel for a never-before-seen
+        // endpoint was silently dropped because `put_channel` had no `else`
+        // branch. After the fix, the pool is created and the channel stored.
+        let pool = ChannelPool::default();
+        let endpoint = "http://test.invalid:1234";
+
+        // `connect_lazy` yields a `Channel` without DNS or TCP — safe in unit tests.
+        let ch1 = Channel::from_shared(endpoint.to_string())
+            .unwrap()
+            .connect_lazy();
+        let ch2 = Channel::from_shared(endpoint.to_string())
+            .unwrap()
+            .connect_lazy();
+
+        pool.put_channel(endpoint, ch1).await.unwrap();
+        pool.put_channel(endpoint, ch2).await.unwrap();
+
+        assert_eq!(pool.pool_size(endpoint).await, 2);
     }
 
     // Note: a unit test that proves `put_channel` + `get_channel` actually

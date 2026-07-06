@@ -10,6 +10,11 @@ use rs_broker_db::outbox::entity::MessageStatus;
 use rs_broker_db::outbox::OutboxMessage;
 use rs_broker_db::{DbPool, DlqMessage, DlqRepository, OutboxRepository};
 
+/// Upper bound on the number of DLQ messages reprocessed in a single `reprocess` call.
+/// Prevents unbounded memory use when a topic has a very large DLQ backlog; callers
+/// can re-invoke `reprocess` to drain additional batches.
+const REPROCESS_BATCH_LIMIT: i64 = 10_000;
+
 /// DLQ handler for managing dead letter messages
 pub struct DlqHandler {
     repository: Arc<dyn DlqRepository>,
@@ -93,8 +98,16 @@ impl DlqHandler {
                 let msg = self.repository.get_by_id(id).await?;
                 vec![msg]
             }
-            DlqSelector::Topic(topic) => self.repository.get_all(Some(topic), 10_000, 0).await?,
-            DlqSelector::All => self.repository.get_all(None, 10_000, 0).await?,
+            DlqSelector::Topic(topic) => {
+                self.repository
+                    .get_all(Some(topic), REPROCESS_BATCH_LIMIT, 0)
+                    .await?
+            }
+            DlqSelector::All => {
+                self.repository
+                    .get_all(None, REPROCESS_BATCH_LIMIT, 0)
+                    .await?
+            }
         };
 
         let mut result = ReprocessResult::default();
