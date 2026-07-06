@@ -1,19 +1,26 @@
 # rs-broker
 
+[![Build](https://github.com/bouroo/rs-broker/actions/workflows/rust.yml/badge.svg)](https://github.com/bouroo/rs-broker/actions/workflows/rust.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://rustup.rs/)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](Cargo.toml)
+[![Contributors](https://img.shields.io/github/contributors/bouroo/rs-broker)](https://github.com/bouroo/rs-broker/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/bouroo/rs-broker?style=flat)](https://github.com/bouroo/rs-broker)
+
 A Rust-based microservice implementing the inbox/outbox pattern to decouple Kafka complexity from downstream services. It provides a unified gRPC interface for both message publishing and consumption, handling retry logic, dead-letter queues, and idempotency automatically.
 
-## Overview
+## ✨ Features
 
-rs-broker is a message broker abstraction layer that simplifies event-driven architectures by:
+- 📦 **Inbox/Outbox Pattern** — Reliable message delivery using database-backed outbox and inbox tables
+- 🔌 **gRPC Interface** — Type-safe API for both publishing and subscribing to Kafka topics
+- 🔄 **Automatic Retry Logic** — Exponential backoff with configurable retry policies and jitter
+- ☠️ **Dead Letter Queue (DLQ)** — Automatic routing of failed messages for later analysis
+- 🔒 **Circuit Breaker** — Protection against downstream service failures
+- 🧮 **Idempotency** — Built-in deduplication for exactly-once semantics
+- 📡 **Flexible Subscriptions** — Pattern-based topic subscriptions with wildcards
+- 💚 **Health Monitoring** — Built-in health checks and Prometheus metrics
 
-- **Inbox/Outbox Pattern**: Reliable message delivery using database-backed outbox and inbox tables
-- **gRPC Interface**: Type-safe API for both publishing and subscribing to Kafka topics
-- **Automatic Retry Logic**: Exponential backoff with configurable retry policies
-- **Dead Letter Queue (DLQ)**: Automatic routing of failed messages for later analysis
-- **Circuit Breaker**: Protection against downstream service failures
-- **Idempotency**: Built-in deduplication for exactly-once semantics
-
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TB
@@ -44,99 +51,106 @@ flowchart TB
     kafka["Confluent Kafka<br/>(KRaft mode)"]
 ```
 
-## Key Features
-
-- **Reliable Message Delivery**: At-least-once delivery with transactional outbox
-- **Idempotent Processing**: Automatic deduplication at both producer and consumer
-- **Smart Retries**: Exponential backoff with jitter and per-message configuration
-- **DLQ Support**: Automatic routing of permanently failed messages
-- **Circuit Breaker**: Protects against cascading failures in downstream services
-- **Flexible Subscriptions**: Pattern-based topic subscriptions with wildcards
-- **Health Monitoring**: Built-in health checks and metrics
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Docker & Docker Compose (recommended)
-- Or for local development:
-  - Rust 1.75+ (install via [rustup](https://rustup.rs/))
-  - CMake 3.15+ (for rdkafka)
-  - Protocol Buffers compiler (protoc)
+- Or for local development: Rust 1.75+, CMake 3.15+ (for rdkafka), protoc
 
 ### Docker (Recommended)
-
-1. Clone and start:
 
 ```bash
 git clone https://github.com/bouroo/rs-broker.git
 cd rs-broker
 cp .env.example .env
 
-# Start core services (PostgreSQL, Kafka, rs-broker)
+# Core services (PostgreSQL, Kafka, rs-broker)
 docker-compose up -d
 
-# Start with Kafka UI
+# With Kafka UI (optional)
 docker-compose --profile ui up -d
 
-# Start everything (monitoring, demo, UI)
+# Full stack with monitoring (optional)
 docker-compose --profile full up -d
 ```
 
-2. Verify services:
+Verify services:
 
 ```bash
-# Health check
-curl http://localhost:8080/health
-
-# Metrics
-curl http://localhost:9090/metrics
-
-# Kafka UI (if using --profile ui)
-open http://localhost:8082
+curl http://localhost:8080/health   # Health check
+curl http://localhost:9090/metrics  # Metrics endpoint
 ```
 
 ### Local Development
 
-1. Start infrastructure only:
-
 ```bash
+# Start infrastructure only
 docker-compose up -d postgres kafka
-```
 
-2. Build and run:
-
-```bash
-cargo build --release
-cargo run --release
+# Build and run rs-broker locally
+cargo build --release && cargo run --release
 ```
 
 ### Running the Service
 
 ```bash
-# Development mode
-cargo run
-
-# Production mode
-cargo run --release
-
-# Producer mode only
-RS_BROKER_SERVER__MODE=producer cargo run
-
-# Consumer mode only
-RS_BROKER_SERVER__MODE=consumer cargo run
+cargo run                           # Development mode (both)
+RS_BROKER_SERVER__MODE=producer cargo run   # Producer only
+RS_BROKER_SERVER__MODE=consumer cargo run   # Consumer only
 ```
 
-## Configuration
+## 📡 API Usage
+
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 8080 | HTTP | REST API & health checks |
+| 50051 | gRPC | gRPC service |
+| 9090 | HTTP | Prometheus metrics |
+
+### Publishing Messages (gRPC)
+
+```bash
+grpcurl -plaintext -d '{
+  "aggregate_type": "Order",
+  "aggregate_id": "order-123",
+  "event_type": "OrderCreated",
+  "payload": "{\"amount\": 100, \"currency\": \"USD\"}",
+  "topic": "orders"
+}' localhost:50051 rsbroker.RsBroker/Publish
+```
+
+### Registering Subscribers (gRPC)
+
+```bash
+grpcurl -plaintext -d '{
+  "subscriber_id": "order-service-1",
+  "service_name": "order-service",
+  "grpc_endpoint": "localhost:50052",
+  "topic_patterns": ["orders.*", "payments.created"]
+}' localhost:50051 rsbroker.RsBroker/RegisterSubscriber
+```
+
+### Consuming Events (gRPC)
+
+```bash
+grpcurl -plaintext -d '{
+  "subscriber_id": "order-service-1",
+  "topic_patterns": ["orders.*"],
+  "position": "LATEST"
+}' localhost:50051 rsbroker.RsBroker/SubscribeEvents
+```
+
+## ⚙️ Configuration
 
 Configuration is loaded in the following order (later sources override earlier):
 
-1. `config/default.toml` - Base configuration
-2. `config/{environment}.toml` - Environment-specific config
+1. `config/default.toml` — Base configuration
+2. `config/{environment}.toml` — Environment-specific config
 3. Environment variables with `RS_BROKER_` prefix
 4. Command-line arguments
 
-### Server Configuration
+### Server
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -147,7 +161,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_SERVER__SHUTDOWN_TIMEOUT_SECS` | `30` | Graceful shutdown timeout |
 | `RS_BROKER_SERVER__REQUEST_TIMEOUT_SECS` | `30` | Request timeout |
 
-### Database Configuration
+### Database
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -161,7 +175,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_DATABASE__MIN_CONNECTIONS` | `5` | Minimum connections |
 | `RS_BROKER_DATABASE__AUTO_MIGRATE` | `true` | Run migrations on startup |
 
-### Kafka Configuration
+### Kafka
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -173,7 +187,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_KAFKA__SASL_USERNAME` | - | SASL username |
 | `RS_BROKER_KAFKA__SASL_PASSWORD` | - | SASL password |
 
-### Retry Configuration
+### Retry
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -181,7 +195,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_RETRY__INITIAL_DELAY_MS` | `1000` | Initial delay in ms |
 | `RS_BROKER_RETRY__MULTIPLIER` | `2.0` | Exponential backoff multiplier |
 | `RS_BROKER_RETRY__MAX_DELAY_MS` | `60000` | Maximum delay in ms |
-| `RS_BROKER_RETRY__JITTER_FACTOR` | `0.1` | Jitter factor (0.0-1.0) |
+| `RS_BROKER_RETRY__JITTER_FACTOR` | `0.1` | Jitter factor (0.0–1.0) |
 
 ### Logging & Metrics
 
@@ -192,57 +206,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_METRICS__ENABLED` | `true` | Enable Prometheus metrics |
 | `RS_BROKER_METRICS__PORT` | `9090` | Metrics port |
 
-## API Usage
-
-### Service Endpoints
-
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 8080 | HTTP | REST API & health checks |
-| 50051 | gRPC | gRPC service |
-| 9090 | HTTP | Prometheus metrics |
-
-### Publishing Messages
-
-Using gRPC, you can publish messages to Kafka through the outbox:
-
-```bash
-# Using grpcurl
-grpcurl -plaintext -d '{
-  "aggregate_type": "Order",
-  "aggregate_id": "order-123",
-  "event_type": "OrderCreated",
-  "payload": "{\"amount\": 100, \"currency\": \"USD\"}",
-  "topic": "orders"
-}' localhost:50051 rsbroker.RsBroker/Publish
-```
-
-### Registering Subscribers
-
-Register your service to receive messages:
-
-```bash
-grpcurl -plaintext -d '{
-  "subscriber_id": "order-service-1",
-  "service_name": "order-service",
-  "grpc_endpoint": "localhost:50052",
-  "topic_patterns": ["orders.*", "payments.created"]
-}' localhost:50051 rsbroker.RsBroker/RegisterSubscriber
-```
-
-### Consuming Events
-
-Subscribe to the event stream:
-
-```bash
-grpcurl -plaintext -d '{
-  "subscriber_id": "order-service-1",
-  "topic_patterns": ["orders.*"],
-  "position": "LATEST"
-}' localhost:50051 rsbroker.RsBroker/SubscribeEvents
-```
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 rs-broker/
@@ -256,108 +220,91 @@ rs-broker/
 │   ├── rs-broker-kafka/       # Kafka producer/consumer
 │   ├── rs-broker-proto/       # gRPC protobuf definitions
 │   └── rs-broker-server/      # Server binary
-├── deploy/
-│   └── prometheus.yml         # Prometheus scrape config
-├── examples/
-│   ├── demo.sh                # gRPC demo script
-│   └── subscriber_client.py   # Sample subscriber
+├── deploy/                    # Prometheus config
+├── examples/                  # Demo scripts & clients
 ├── docs/                      # Documentation
 ├── migrations/                # SQL migrations
 └── proto/                     # Protocol Buffers
 ```
 
-## Development
+## 🛠️ Development
 
 ### Running Tests
 
 ```bash
-# Run all tests
-cargo test
-
-# Run tests with output
-cargo test -- --nocapture
-
-# Run specific crate tests
-cargo test -p rs-broker-core
+cargo test                           # All tests
+cargo test -- --nocapture            # Verbose output
+cargo test -p rs-broker-core         # Specific crate
 ```
 
 ### Running Migrations
 
+Migrations run automatically with `auto_migrate=true`. Or manually:
+
 ```bash
-# Migrations run automatically with auto_migrate=true
-# Or manually with SQL client:
 psql -U rsbroker -d rsbroker -f migrations/0001_init.sql
 ```
 
 ### Code Generation
 
 ```bash
-# Regenerate protobuf
-cargo build -p rs-broker-proto
+cargo build -p rs-broker-proto   # Regenerate protobuf bindings
 ```
 
 ### Git Hooks
 
-This repo ships local git hooks that run the verify pipeline before commits and pushes.
+This repo ships git hooks that run the verify pipeline before commits and pushes.
 
 ```bash
-make install-hooks        # symlink scripts/hooks/{pre-commit,pre-push} into .git/hooks
-make install-hooks -- --force   # overwrite existing user-authored hooks (backs them up)
+make install-hooks              # Symlink hooks into .git/hooks/
+make install-hooks -- --force   # Overwrite existing (backs them up)
 ```
 
-| Hook        | Profile | Stages                                                       |
-| ----------- | ------- | ------------------------------------------------------------ |
-| `pre-commit`| `fast`  | `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo check --workspace --all-targets` |
-| `pre-push`  | `full`  | fast stages + `cargo test --workspace`                       |
+| Hook | Profile | Stages |
+|------|---------|--------|
+| `pre-commit` | `fast` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo check --workspace` |
+| `pre-push` | `full` | fast stages + `cargo test --workspace` |
 
-Run the pipeline manually outside git:
+Run the pipeline manually:
 
 ```bash
-make verify        # full profile (fast + test)
-make verify-fast   # fast profile only
+make verify        # Full (fast + test)
+make verify-fast   # Fast only
 ```
 
-Bypass a hook when you know what you're doing:
+Bypass a hook when needed:
 
 ```bash
 git commit --no-verify
 git push --no-verify
 ```
 
-The hooks are symlinked from `scripts/hooks/` into `.git/hooks/`, so edits to the
-source scripts take effect immediately — no reinstall needed. To uninstall,
-just remove the symlinks from `.git/hooks/`.
+## 🐳 Deployment
 
-## Deployment
-
-### Docker
-
-#### Multi-Stage Dockerfile
+### Docker — Multi-Stage Builds
 
 The Dockerfile supports multiple targets:
 
 ```bash
-# Production (distroless - minimal)
-docker build -t rs-broker:latest .
+# Production (distroless — minimal)
 docker build -t rs-broker:latest --target production .
 
-# Development (alpine - with shell)
+# Development (alpine — with shell)
 docker build -t rs-broker:dev --target development .
 
 # With MySQL support
 docker build -t rs-broker:mysql --build-arg DATABASE_FEATURE=mysql .
 ```
 
-#### Running Containers
+### Running Containers
 
 ```bash
-# Basic run
+# Basic run with env file
 docker run -d --name rs-broker \
   -p 8080:8080 -p 50051:50051 -p 9090:9090 \
-  --env-file .env \
-  rs-broker:latest
+  --env-file .env rs-broker:latest
 
-# With environment overrides
+# With inline overrides
 docker run -d --name rs-broker \
   -p 8080:8080 -p 50051:50051 -p 9090:9090 \
   -e RS_BROKER_DATABASE__HOST=postgres \
@@ -379,31 +326,18 @@ docker run -d --name rs-broker \
 | `full` | All services | Complete stack |
 
 ```bash
-# Core services only
-docker-compose up -d
-
-# With Kafka UI
-docker-compose --profile ui up -d
-
-# Producer/Consumer split deployment
-docker-compose --profile producer --profile consumer up -d
-
-# Full stack with monitoring
-docker-compose --profile full up -d
-
-# Cleanup
-docker-compose down -v
+docker-compose up -d                              # Core only
+docker-compose --profile ui up -d                 # With Kafka UI
+docker-compose --profile producer --profile consumer up -d  # Split deployment
+docker-compose --profile full up -d               # Full stack
+docker-compose down -v                            # Cleanup
 ```
 
 ### Demo Script
 
-Test rs-broker features with the included demo script:
+Test rs-broker features with the included demo script (requires [`grpcurl`](https://github.com/fullstorydev/grpcurl)):
 
 ```bash
-# Install grpcurl first
-go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-
-# Run demo
 ./examples/demo.sh check      # Check connection
 ./examples/demo.sh publish    # Publish test message
 ./examples/demo.sh batch      # Publish batch
@@ -414,12 +348,10 @@ go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 
 ### Kubernetes
 
-Apply the Kubernetes manifests:
-
 ```bash
 kubectl apply -f k8s/
 ```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
