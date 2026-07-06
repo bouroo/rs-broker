@@ -591,40 +591,4 @@ criterion_group!(
     bench_registry_scale
 );
 
-// Include the new benchmark groups
-mod dlq;
-mod outbox_manager;
-mod outbox_publisher;
-mod retry;
-
-criterion_group!(
-    inbox_benches,
-    // Existing benchmarks
-    bench_dedup_check,
-    bench_dedup_check_batch,
-    bench_dedup_concurrent,
-    bench_dedup_with_cache,
-    bench_get_subscribers_exact,
-    bench_get_subscribers_wildcard,
-    bench_get_subscribers_pattern,
-    bench_dispatch_single_subscriber,
-    bench_dispatch_multiple_subscribers,
-    bench_dispatch_parallel,
-    bench_pattern_exact_match,
-    bench_pattern_wildcard_single,
-    bench_pattern_wildcard_multi,
-    bench_pattern_complex,
-    bench_pattern_registry_lookup,
-    bench_registry_add,
-    bench_registry_remove,
-    bench_registry_get_by_topic,
-    bench_registry_scale
-);
-
-criterion_main!(
-    inbox_benches,
-    outbox_manager::outbox_manager_benches,
-    outbox_publisher::outbox_publisher_benches,
-    retry::retry_benches,
-    dlq::dlq_benches
-);
+criterion_main!(benches);

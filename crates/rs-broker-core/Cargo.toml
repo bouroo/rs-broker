@@ -36,3 +36,23 @@ rand = "0.8"
 default = ["postgres"]
 postgres = ["rs-broker-db/postgres"]
 mysql = ["rs-broker-db/mysql"]
+
+[[bench]]
+name = "lib"
+harness = false
+
+[[bench]]
+name = "dlq"
+harness = false
+
+[[bench]]
+name = "outbox_manager"
+harness = false
+
+[[bench]]
+name = "outbox_publisher"
+harness = false
+
+[[bench]]
+name = "retry"
+harness = false
