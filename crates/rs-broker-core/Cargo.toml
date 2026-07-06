@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 tokio = { workspace = true }
+futures = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
@@ -55,4 +56,8 @@ harness = false
 
 [[bench]]
 name = "retry"
+harness = false
+
+[[bench]]
+name = "fan_out"
 harness = false

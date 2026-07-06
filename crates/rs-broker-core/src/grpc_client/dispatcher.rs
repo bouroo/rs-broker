@@ -1,5 +1,6 @@
 //! Subscriber dispatcher with circuit breaker pattern
 
+use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -189,6 +190,15 @@ pub struct DeliveryResult {
     pub retry_delay_ms: i64,
 }
 
+/// Default upper bound for concurrent in-flight deliveries per fan-out.
+///
+/// 32 is chosen to give meaningful parallelism for typical workloads (most
+/// topics have far fewer than 32 matching subscribers) while keeping the
+/// per-process concurrent gRPC call count bounded under bursty fan-out
+/// (a 1k-subscriber topic won't open 1k simultaneous connections). With a
+/// 10s per-request timeout, worst-case memory is ~32 in-flight requests.
+const DEFAULT_FAN_OUT_CONCURRENCY: usize = 32;
+
 /// Subscriber dispatcher for delivering messages to subscribers
 pub struct SubscriberDispatcher {
     /// Database pool
@@ -199,6 +209,9 @@ pub struct SubscriberDispatcher {
     request_timeout: Duration,
     /// Channel pool for gRPC connections
     channel_pool: Arc<ChannelPool>,
+    /// Upper bound on concurrent in-flight deliveries per `dispatch_to_all`
+    /// call. See [`DEFAULT_FAN_OUT_CONCURRENCY`].
+    fan_out_concurrency: usize,
 }
 
 impl SubscriberDispatcher {
@@ -209,7 +222,14 @@ impl SubscriberDispatcher {
             endpoints: Arc::new(RwLock::new(HashMap::new())),
             request_timeout: Duration::from_secs(10),
             channel_pool: Arc::new(ChannelPool::new(ChannelPoolConfig::default())),
+            fan_out_concurrency: DEFAULT_FAN_OUT_CONCURRENCY,
         }
+    }
+
+    /// Maximum number of concurrent in-flight deliveries per `dispatch_to_all`
+    /// call. See [`DEFAULT_FAN_OUT_CONCURRENCY`].
+    pub fn fan_out_concurrency(&self) -> usize {
+        self.fan_out_concurrency
     }
 
     /// Load subscribers from database
@@ -331,6 +351,13 @@ impl SubscriberDispatcher {
     }
 
     /// Dispatch to all matching subscribers
+    ///
+    /// Fan-out is bounded by `fan_out_concurrency` (see
+    /// [`DEFAULT_FAN_OUT_CONCURRENCY`]) using `buffer_unordered`, so total
+    /// delivery latency is bounded by the slowest matching subscriber rather
+    /// than the sum of per-subscriber latencies. Results are returned in
+    /// completion order, not submission order; callers identify results by
+    /// `DeliveryResult::subscriber_id` rather than Vec position.
     pub async fn dispatch_to_all(
         &self,
         topic: &str,
@@ -338,13 +365,21 @@ impl SubscriberDispatcher {
     ) -> Vec<DeliveryResult> {
         let subscribers = self.get_matching_subscribers(topic).await;
 
-        let mut results = Vec::new();
-        for subscriber in subscribers {
-            let result = self.dispatch(&subscriber, request.clone()).await;
-            results.push(result);
+        if subscribers.is_empty() {
+            return Vec::new();
         }
 
-        results
+        let concurrency = self.fan_out_concurrency.max(1).min(subscribers.len());
+
+        stream::iter(subscribers)
+            .map(|subscriber| {
+                let request = request.clone();
+                let subscriber = subscriber.clone();
+                async move { self.dispatch(&subscriber, request).await }
+            })
+            .buffer_unordered(concurrency)
+            .collect()
+            .await
     }
 }
 
@@ -457,5 +492,119 @@ mod tests {
         assert!(r.retry);
         assert_eq!(r.error.as_deref(), Some("Request timeout"));
         assert_eq!(r.retry_delay_ms, 2000);
+    }
+
+    /// `dispatch_to_all` on an empty subscriber set must short-circuit and
+    /// return an empty `Vec` without touching any channels or circuit
+    /// breakers. This guards the early-return path added when fan-out was
+    /// converted from a sequential loop to a concurrent stream.
+    #[tokio::test]
+    async fn dispatch_to_all_empty_subscriber_set_returns_empty_vec() {
+        let sd = SubscriberDispatcher::new(test_db_pool());
+        let results = sd
+            .dispatch_to_all("no-such-topic", DeliverRequest::default())
+            .await;
+        assert!(
+            results.is_empty(),
+            "empty subscriber set must produce empty result vec, got {results:?}"
+        );
+    }
+
+    /// Verifies the `fan_out_concurrency` field is initialized to the
+    /// documented default. Callers can read this via `fan_out_concurrency()`
+    /// to inspect (and tests can pin regressions on) the bound.
+    #[tokio::test]
+    async fn default_fan_out_concurrency_matches_documented_constant() {
+        let sd = SubscriberDispatcher::new(test_db_pool());
+        assert_eq!(sd.fan_out_concurrency(), DEFAULT_FAN_OUT_CONCURRENCY);
+        assert!(sd.fan_out_concurrency() >= 1);
+    }
+
+    /// Exercises the concurrent fan-out path through the circuit-breaker
+    /// fast-fail branch (no live gRPC channels required). We pre-populate
+    /// the endpoint cache, open every endpoint's circuit via
+    /// `record_failure`, then call `dispatch_to_all` and assert one
+    /// fast-fail `DeliveryResult` per matching subscriber with the correct
+    /// `subscriber_id`. This proves the `buffer_unordered` refactor still
+    /// produces a result for every subscriber and preserves `subscriber_id`.
+    #[tokio::test]
+    async fn dispatch_to_all_returns_one_fast_fail_result_per_subscriber() {
+        use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
+
+        let sd = SubscriberDispatcher::new(test_db_pool());
+
+        // Three subscribers all matching topic "orders.created".
+        let subs = vec![
+            Subscriber::new(
+                "svc-a".into(),
+                "http://a:1".into(),
+                vec!["orders.created".into()],
+            ),
+            Subscriber::new(
+                "svc-b".into(),
+                "http://b:1".into(),
+                vec!["orders.created".into()],
+            ),
+            Subscriber::new(
+                "svc-c".into(),
+                "http://c:1".into(),
+                vec!["orders.created".into()],
+            ),
+        ];
+        let expected_ids: std::collections::HashSet<String> =
+            subs.iter().map(|s| s.id.to_string()).collect();
+
+        // Seed the endpoint cache (normally `refresh_subscribers` does this)
+        // and open every circuit so the fast-fail branch fires inside dispatch.
+        {
+            let mut endpoints = sd.endpoints.write().await;
+            for s in &subs {
+                let mut ep = SubscriberEndpoint::new(s.clone());
+                let mut cb = CircuitBreaker::new(CircuitBreakerConfig {
+                    failure_threshold: 1,
+                    ..CircuitBreakerConfig::default()
+                });
+                cb.record_failure(); // opens immediately
+                ep.circuit_breaker = cb;
+                endpoints.insert(s.id.to_string(), ep);
+            }
+        }
+
+        let results = sd
+            .dispatch_to_all("orders.created", DeliverRequest::default())
+            .await;
+
+        assert_eq!(
+            results.len(),
+            subs.len(),
+            "expected one DeliveryResult per matching subscriber"
+        );
+
+        let got_ids: std::collections::HashSet<String> =
+            results.iter().map(|r| r.subscriber_id.clone()).collect();
+        assert_eq!(
+            got_ids, expected_ids,
+            "every matching subscriber must appear in the results"
+        );
+
+        for r in &results {
+            assert!(!r.success, "open circuit must surface as failure");
+            assert!(r.retry);
+            assert_eq!(r.error.as_deref(), Some("Circuit breaker open"));
+            assert_eq!(r.retry_delay_ms, 1000);
+        }
+    }
+
+    /// Synthetic DB pool that satisfies the `DbPool` shape used by
+    /// `SubscriberDispatcher::new` without ever opening a real database
+    /// connection. `connect_lazy` defers the TCP connect until the first
+    /// query; the empty-subscriber-set and circuit-breaker fast-fail tests
+    /// never query the pool, so the URL is never contacted.
+    fn test_db_pool() -> DbPool {
+        use sqlx::postgres::PgPoolOptions;
+        PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/none")
+            .expect("lazy pg pool")
     }
 }
