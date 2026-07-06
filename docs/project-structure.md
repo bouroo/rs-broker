@@ -132,25 +132,37 @@ Core business logic for inbox/outbox patterns.
 ```
 crates/rs-broker-core/
 ├── Cargo.toml
-└── src/
-    ├── lib.rs
-    ├── outbox/
-    │   ├── mod.rs
-    │   ├── manager.rs       # Outbox business logic
-    │   ├── publisher.rs     # Background publisher worker
-    │   └── retry.rs         # Retry strategy implementation
-    ├── inbox/
-    │   ├── mod.rs
-    │   ├── manager.rs       # Inbox business logic
-    │   ├── dispatcher.rs    # gRPC dispatcher to subscribers
-    │   └── dedup.rs         # Deduplication logic
-    ├── dlq/
-    │   ├── mod.rs
-    │   └── handler.rs       # DLQ routing and management
-    ├── subscriber/
-    │   ├── mod.rs
-    │   └── registry.rs      # Subscriber registration
-    └── error.rs             # Domain errors
+├── src/
+│   ├── lib.rs
+│   ├── topic.rs            # MQTT-standard topic pattern matching
+│   ├── error.rs            # Domain errors
+│   ├── outbox/
+│   │   ├── mod.rs
+│   │   ├── manager.rs      # Outbox business logic
+│   │   ├── publisher.rs    # Background publisher worker
+│   │   └── retry.rs        # Retry strategy implementation
+│   ├── inbox/
+│   │   ├── mod.rs
+│   │   ├── manager.rs      # Inbox business logic
+│   │   ├── dispatcher.rs   # Topic→subscriber dispatch with pattern cache
+│   │   └── dedup.rs        # Deduplication (atomic check_and_mark)
+│   ├── grpc_client/
+│   │   ├── mod.rs
+│   │   ├── channel_pool.rs # gRPC channel pool (connection reuse)
+│   │   └── dispatcher.rs   # SubscriberDispatcher (circuit breaker, concurrent fan-out)
+│   ├── dlq/
+│   │   ├── mod.rs
+│   │   └── handler.rs      # DLQ routing and management
+│   └── subscriber/
+│       ├── mod.rs
+│       └── registry.rs     # Subscriber registration
+└── benches/
+    ├── lib.rs              # Dedup, dispatch, pattern, registry benchmarks
+    ├── fan_out.rs          # Sequential vs concurrent fan-out
+    ├── dlq.rs
+    ├── outbox_manager.rs
+    ├── outbox_publisher.rs
+    └── retry.rs
 ```
 
 **Dependencies:**
@@ -462,17 +474,22 @@ rs-broker/
 
 ```rust
 // crates/rs-broker-core/src/lib.rs
-pub mod outbox;
-pub mod inbox;
 pub mod dlq;
-pub mod subscriber;
 pub mod error;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+pub mod grpc_client;
+pub mod inbox;
+pub mod outbox;
+pub mod subscriber;
+pub mod topic;
 
-pub use outbox::OutboxManager;
-pub use inbox::InboxManager;
-pub use dlq::DlqHandler;
-pub use subscriber::SubscriberRegistry;
+pub use dlq::{DlqHandler, DlqSelector, ReprocessResult};
 pub use error::{Error, Result};
+pub use inbox::InboxManager;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+pub use outbox::OutboxManager;
+pub use subscriber::SubscriberRegistry;
+pub use topic::{matches_any, matches_topic};
 ```
 
 ### Database Module Exports

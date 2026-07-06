@@ -87,7 +87,7 @@ flowchart TB
     subgraph rsbroker["rs-broker"]
         consumer["1. Kafka Consumer<br/>• Subscribe to topics<br/>• Consumer group management<br/>• Offset management"]
         inbox["2. Inbox Manager<br/>• Check idempotency key<br/>• Deduplicate messages<br/>• Insert to inbox [RECEIVED]<br/>• Commit offset"]
-        dispatcher["3. gRPC Dispatcher<br/>• Load subscribers<br/>• Fan-out to downstream services<br/>• Track delivery status"]
+        dispatcher["3. gRPC Dispatcher<br/>• Load subscribers<br/>• Fan-out to downstream services (bounded concurrent delivery, default 32 in-flight)<br/>• Track delivery status"]
         aggregator["4. Status Aggregator<br/>• Collect responses<br/>• Update inbox [PROCESSED]<br/>• Handle partial failures"]
     end
     
@@ -170,6 +170,19 @@ stateDiagram-v2
 - Unique constraint on `inbox.message_id`
 - Duplicate consume attempts return existing processing status
 - Subscriber deliveries tracked in `inbox_deliveries` table
+
+## Topic Matching
+
+Subscriber `topic_patterns` use MQTT-standard wildcard semantics, evaluated by a single unified matcher (`rs-broker-core::topic`):
+
+| Wildcard | Meaning |
+|----------|---------|
+| `+` | Matches exactly one segment (e.g., `orders.+` matches `orders.created` but not `orders.created.vip`) |
+| `#` | Matches zero or more remaining segments (e.g., `orders.#` matches `orders`, `orders.created`, `orders.created.vip`) |
+| `*` | Alias for `+` — matches one segment. Backward-compatible with existing `orders.*` patterns |
+| literal | Must match the segment exactly |
+
+Segments are separated by `.`. An inline `*` within a segment (e.g., `order*`) acts as a prefix glob against the topic string.
 
 ## Data Flow Summary
 
