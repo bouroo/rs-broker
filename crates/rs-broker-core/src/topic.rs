@@ -271,4 +271,49 @@ mod tests {
         let patterns: Vec<String> = vec![];
         assert!(!matches_any("orders.created", &patterns));
     }
+
+    // ---- Edge cases: inline-glob, hash-not-alone, empty segments ----
+    #[test]
+    fn inline_star_matches_multi_segment_topic() {
+        // Inline '*' prefix is dot-free, so it cannot match across a segment
+        // boundary; this locks that the prefix-glob checks the current segment.
+        assert!(matches_topic("orders.created", "order*"));
+    }
+
+    #[test]
+    fn inline_star_empty_prefix_matches_anything() {
+        // A leading '*' (e.g. "*b") yields an empty prefix, which matches any
+        // topic segment via starts_with("").
+        assert!(matches_topic("anything", "*b"));
+        assert!(matches_topic("xyz", "*xyz"));
+    }
+
+    #[test]
+    fn inline_star_segment_shorter_than_prefix() {
+        assert!(!matches_topic("or", "order*"));
+    }
+
+    #[test]
+    fn hash_not_treated_as_wildcard_when_not_alone() {
+        // Only the exact segment "#" is the multi-segment wildcard.
+        assert!(!matches_topic("foo", "#foo"));
+        assert!(matches_topic("#foo", "#foo"));
+    }
+
+    #[test]
+    fn double_dot_empty_segment() {
+        // Empty segments between dots are real and must compare equal.
+        assert!(matches_topic("a..b", "a..b"));
+    }
+
+    #[test]
+    fn plus_then_hash_matches_multi() {
+        assert!(matches_topic("a.b.c", "+.#"));
+        assert!(matches_topic("a", "+.#"));
+    }
+
+    #[test]
+    fn pattern_exhausted_before_topic() {
+        assert!(!matches_topic("a.b", "a"));
+    }
 }
