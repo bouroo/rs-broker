@@ -211,7 +211,7 @@ Configuration is loaded in the following order (later sources override earlier):
 ```
 rs-broker/
 ├── Cargo.toml                 # Workspace manifest
-├── Dockerfile                 # Multi-stage production build
+├── Containerfile                 # Multi-stage production build
 ├── compose.yml                # Docker Compose with profiles
 ├── crates/
 │   ├── rs-broker-config/      # Configuration management
@@ -283,7 +283,7 @@ git push --no-verify
 
 ### Docker — Multi-Stage Builds
 
-The Dockerfile supports multiple targets:
+The Containerfile supports multiple targets:
 
 ```bash
 # Production (distroless — minimal)

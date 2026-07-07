@@ -112,7 +112,7 @@ services:
   rs-broker-producer:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
       target: development
     container_name: rs-broker-producer
     depends_on:
@@ -149,7 +149,7 @@ services:
   rs-broker-consumer:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
       target: development
     container_name: rs-broker-consumer
     depends_on:
@@ -186,7 +186,7 @@ services:
   rs-broker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
       target: development
     container_name: rs-broker
     depends_on:

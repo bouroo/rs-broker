@@ -1,5 +1,5 @@
 # =============================================================================
-# rs-broker Multi-Stage Dockerfile
+# rs-broker Multi-Stage Containerfile
 # =============================================================================
 # Build optimized production images for the rs-broker service
 #

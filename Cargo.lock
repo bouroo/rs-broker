@@ -2512,6 +2512,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "futures",
  "futures-util",
  "parking_lot",
  "rand",

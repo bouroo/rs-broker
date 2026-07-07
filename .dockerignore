@@ -52,7 +52,7 @@ LICENSE
 Makefile
 compose.yml
 compose.test.yml
-Dockerfile
+Containerfile
 Containerfile.test
 scripts/
 .ruff_cache/
