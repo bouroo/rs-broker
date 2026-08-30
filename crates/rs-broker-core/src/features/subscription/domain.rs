@@ -33,6 +33,13 @@ pub struct Subscriber {
 }
 
 impl Subscriber {
+    /// Domain rule: does this subscriber subscribe to `topic`? Delegates to
+    /// the shared MQTT-semantics matcher so every delivery path agrees on
+    /// what a pattern means.
+    pub fn matches_topic(&self, topic: &str) -> bool {
+        crate::shared::topic::matches_any(topic, &self.topic_patterns)
+    }
+
     /// Create a new subscriber
     pub fn new(service_name: String, grpc_endpoint: String, topic_patterns: Vec<String>) -> Self {
         let now = Utc::now();

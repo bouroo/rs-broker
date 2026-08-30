@@ -13,7 +13,6 @@ use crate::features::delivery::ports::{
 use crate::features::subscription::ports::SubscriberRepository;
 use crate::features::subscription::Subscriber;
 use crate::shared::error::{Error, Result};
-use crate::shared::topic::matches_any;
 /// Circuit breaker state
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CircuitBreakerState {
@@ -283,7 +282,7 @@ impl SubscriberDispatcher {
 
         endpoints
             .values()
-            .filter(|e| matches_any(topic, &e.subscriber.topic_patterns))
+            .filter(|e| e.subscriber.matches_topic(topic))
             .map(|e| e.subscriber.clone())
             .collect()
     }

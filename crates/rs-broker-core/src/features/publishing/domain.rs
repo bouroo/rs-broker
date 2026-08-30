@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::retry::{PublishFailureDecision, RetryStrategy};
+
 /// Message status in the outbox
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -78,6 +80,25 @@ pub struct OutboxMessage {
 }
 
 impl OutboxMessage {
+    /// Domain rule for a failed publish attempt: retries remain → schedule a
+    /// retry with exponential backoff; exhausted → dead-letter (when enabled)
+    /// or permanent failure. Encodes the ladder as entity behaviour so the
+    /// drain use case only executes the decision.
+    pub fn evaluate_publish_failure(&self, retry: &RetryStrategy) -> PublishFailureDecision {
+        let attempts_so_far = self.retry_count.max(0) as u32;
+        if retry.should_retry(attempts_so_far) {
+            PublishFailureDecision::Retry {
+                next_delay: retry.calculate_delay(attempts_so_far),
+            }
+        } else if retry.is_dlq_enabled() {
+            PublishFailureDecision::DeadLetter {
+                topic: retry.dlq_topic().to_string(),
+            }
+        } else {
+            PublishFailureDecision::Fail
+        }
+    }
+
     /// Create a new outbox message
     pub fn new(
         aggregate_type: String,

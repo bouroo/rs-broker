@@ -10,7 +10,6 @@ use crate::features::delivery::ports::DeliverNotification;
 use crate::features::subscription::ports::SubscriberRepository;
 use crate::features::subscription::Subscriber;
 use crate::shared::error::Result;
-use crate::shared::topic::matches_topic;
 
 /// Default capacity for the pattern cache.
 const DEFAULT_PATTERN_CACHE_CAPACITY: usize = 1000;
@@ -129,14 +128,8 @@ impl Dispatcher {
         let all = self.subscriber_repository.get_all_active().await?;
 
         // Filter subscribers by topic pattern
-        let matching: Vec<Subscriber> = all
-            .into_iter()
-            .filter(|s| {
-                s.topic_patterns
-                    .iter()
-                    .any(|pattern| matches_topic(topic, pattern))
-            })
-            .collect();
+        let matching: Vec<Subscriber> =
+            all.into_iter().filter(|s| s.matches_topic(topic)).collect();
 
         // Cache the result (single-entry FIFO eviction when full)
         {

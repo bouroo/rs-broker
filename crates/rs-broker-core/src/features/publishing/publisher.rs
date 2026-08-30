@@ -9,7 +9,8 @@ use tracing::{error, info, warn};
 
 use crate::features::publishing::{
     ports::{MessageSink, OutboundMessage, OutboxRepository},
-    retry::RetryStrategy,
+    retry::{PublishFailureDecision, RetryStrategy},
+    MessageStatus,
 };
 use crate::shared::error::Result;
 use rs_broker_config::RetryConfig;
@@ -104,37 +105,40 @@ impl OutboxPublisher {
                     e
                 );
 
-                if retry_strategy.should_retry(attempt) {
-                    // Will be retried on the next tick — status stays `retrying`.
-                    let new_count = repository
-                        .increment_retry(message.id, Some(e.to_string()))
-                        .await
-                        .unwrap_or_else(|err| {
-                            error!(
-                                "Failed to increment retry for message {}: {} (original: {})",
-                                message.id, err, e
-                            );
-                            attempt as i32
-                        });
+                // The retry→DLQ→failed ladder is the entity's rule; the
+                // use case only executes it.
+                match message.evaluate_publish_failure(retry_strategy) {
+                    PublishFailureDecision::Retry { next_delay } => {
+                        // Will be retried on the next tick — status stays `retrying`.
+                        let new_count = repository
+                            .increment_retry(message.id, Some(e.to_string()))
+                            .await
+                            .unwrap_or_else(|err| {
+                                error!(
+                                    "Failed to increment retry for message {}: {} (original: {})",
+                                    message.id, err, e
+                                );
+                                attempt as i32
+                            });
 
-                    let delay = retry_strategy.calculate_delay(new_count as u32);
-                    warn!(
-                        "Message {} scheduled for retry (attempt {}, next delay {:?})",
-                        message.id, new_count, delay
-                    );
-                } else {
-                    // Retries exhausted.
-                    error!(
-                        "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
-                        message.id, attempt
-                    );
+                        let delay = retry_strategy.calculate_delay(new_count as u32);
+                        let _ = &next_delay; // decision carries the backoff the repository applies
+                        warn!(
+                            "Message {} scheduled for retry (attempt {}, next delay {:?})",
+                            message.id, new_count, delay
+                        );
+                    }
+                    PublishFailureDecision::DeadLetter { topic: dlq_topic } => {
+                        // Retries exhausted.
+                        error!(
+                            "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
+                            message.id, attempt
+                        );
 
-                    if retry_strategy.is_dlq_enabled() {
                         // Route to DLQ topic.
-                        let dlq_topic = retry_strategy.dlq_topic();
                         let dlq_payload = serde_json::to_vec(&message.payload)?;
                         let dlq_outbound = OutboundMessage {
-                            topic: dlq_topic.to_string(),
+                            topic: dlq_topic.clone(),
                             key: message.partition_key.clone(),
                             payload: dlq_payload,
                             partition: None,
@@ -150,7 +154,7 @@ impl OutboxPublisher {
                         if let Err(db_err) = repository
                             .update_status(
                                 message.id,
-                                crate::features::publishing::domain::MessageStatus::Dlq,
+                                MessageStatus::Dlq,
                                 Some(format!("exhausted {attempt} retries; last error: {e}")),
                             )
                             .await
@@ -160,11 +164,18 @@ impl OutboxPublisher {
                                 message.id, db_err
                             );
                         }
-                    } else {
+                    }
+                    PublishFailureDecision::Fail => {
+                        // Retries exhausted.
+                        error!(
+                            "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
+                            message.id, attempt
+                        );
+
                         if let Err(db_err) = repository
                             .update_status(
                                 message.id,
-                                crate::features::publishing::domain::MessageStatus::Failed,
+                                MessageStatus::Failed,
                                 Some(format!("exhausted {attempt} retries; last error: {e}")),
                             )
                             .await

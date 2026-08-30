@@ -1,6 +1,22 @@
-//! Retry strategy implementation
+//! Retry policy value: exponential backoff with optional DLQ routing.
 
 use rs_broker_config::RetryConfig;
+
+/// The decision the publish drain should take after a failed sink attempt.
+///
+/// Derived by the outbox message itself from the retry policy (see
+/// [`super::domain::OutboxMessage::evaluate_publish_failure`]), so the
+/// retry→DLQ→failed ladder lives in the domain, not in the worker loop.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PublishFailureDecision {
+    /// Retries remain: the message stays in the outbox for the next tick and
+    /// the given backoff applies before it.
+    Retry { next_delay: std::time::Duration },
+    /// Retries exhausted; route to the dead-letter topic.
+    DeadLetter { topic: String },
+    /// Retries exhausted with DLQ disabled; mark permanently failed.
+    Fail,
+}
 
 /// Exponential backoff retry strategy
 #[derive(Clone, Debug)]
