@@ -4,11 +4,10 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::error::Result;
-use rs_broker_db::dlq::repository::SqlxDlqRepository;
-use rs_broker_db::outbox::entity::MessageStatus;
-use rs_broker_db::outbox::OutboxMessage;
-use rs_broker_db::{DbPool, DlqMessage, DlqRepository, OutboxRepository};
+use crate::features::dead_letter::{ports::DlqRepository, DlqMessage};
+use crate::features::publishing::domain::MessageStatus;
+use crate::features::publishing::{ports::OutboxRepository, OutboxMessage};
+use crate::shared::error::Result;
 
 /// Upper bound on the number of DLQ messages reprocessed in a single `reprocess` call.
 /// Prevents unbounded memory use when a topic has a very large DLQ backlog; callers
@@ -22,11 +21,8 @@ pub struct DlqHandler {
 
 impl DlqHandler {
     /// Create a new DLQ handler
-    pub fn new(pool: DbPool) -> Self {
-        let repository = SqlxDlqRepository::new(pool);
-        Self {
-            repository: Arc::new(repository) as Arc<dyn DlqRepository>,
-        }
+    pub fn new(repository: Arc<dyn DlqRepository>) -> Self {
+        Self { repository }
     }
 
     /// Create a new DLQ handler with a custom repository (for testing)

@@ -3,7 +3,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_config::RetryConfig;
-use rs_broker_core::outbox::retry::RetryStrategy;
+use rs_broker_core::features::publishing::RetryStrategy;
 
 /// Helper to create a test retry strategy
 fn create_test_retry_strategy() -> RetryStrategy {

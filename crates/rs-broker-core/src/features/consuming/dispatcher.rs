@@ -5,15 +5,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::error::Result;
-use crate::topic::matches_topic;
-use rs_broker_db::subscriber::repository::SqlxSubscriberRepository;
-use rs_broker_db::{DbPool, Subscriber, SubscriberRepository};
-
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-use crate::grpc_client::dispatcher::SubscriberDispatcher;
-
-#[cfg(any(feature = "postgres", feature = "mysql"))]
+use crate::features::delivery::dispatcher::SubscriberDispatcher;
+use crate::features::subscription::ports::SubscriberRepository;
+use crate::features::subscription::Subscriber;
+use crate::shared::error::Result;
+use crate::shared::topic::matches_topic;
 use rs_broker_proto::rsbroker::DeliverRequest;
 
 /// Default capacity for the pattern cache.
@@ -83,14 +79,12 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     /// Create a new dispatcher
-    pub fn new(pool: DbPool) -> Self {
-        let repository = SqlxSubscriberRepository::new(pool);
+    pub fn new(repository: Arc<dyn SubscriberRepository>) -> Self {
         Self {
-            subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
+            subscriber_repository: repository,
             pattern_cache: Arc::new(RwLock::new(SubscriberCache::new(
                 DEFAULT_PATTERN_CACHE_CAPACITY,
             ))),
-            #[cfg(any(feature = "postgres", feature = "mysql"))]
             subscriber_dispatcher: None,
         }
     }
@@ -108,14 +102,12 @@ impl Dispatcher {
     }
 
     /// Create a new dispatcher with a SubscriberDispatcher for real gRPC delivery
-    #[cfg(any(feature = "postgres", feature = "mysql"))]
     pub fn with_subscriber_dispatcher(
-        pool: DbPool,
+        subscriber_repository: Arc<dyn SubscriberRepository>,
         subscriber_dispatcher: Arc<SubscriberDispatcher>,
     ) -> Self {
-        let repository = SqlxSubscriberRepository::new(pool);
         Self {
-            subscriber_repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
+            subscriber_repository,
             pattern_cache: Arc::new(RwLock::new(SubscriberCache::new(
                 DEFAULT_PATTERN_CACHE_CAPACITY,
             ))),
@@ -158,7 +150,6 @@ impl Dispatcher {
     /// Dispatch a message to all matching subscribers
     pub async fn dispatch(&self, topic: &str, payload: &[u8]) -> Result<usize> {
         // If a SubscriberDispatcher is configured, use it for real gRPC delivery
-        #[cfg(any(feature = "postgres", feature = "mysql"))]
         if let Some(ref sd) = self.subscriber_dispatcher {
             let request = DeliverRequest {
                 message_id: uuid::Uuid::now_v7().to_string(),

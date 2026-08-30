@@ -1,4 +1,4 @@
-//! Inbox entity types
+//! Consuming domain: the inbox message entity and its processing status.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

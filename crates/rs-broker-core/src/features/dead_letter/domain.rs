@@ -1,4 +1,4 @@
-//! DLQ message entity types
+//! Dead-letter domain: a message that exhausted retries, parked for inspection.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

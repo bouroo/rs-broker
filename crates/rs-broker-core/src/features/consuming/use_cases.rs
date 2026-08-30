@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::error::Result;
-use rs_broker_db::inbox::repository::SqlxInboxRepository;
-use rs_broker_db::{DbPool, InboxMessage, InboxRepository};
+use crate::features::consuming::{ports::InboxRepository, InboxMessage};
+use crate::shared::error::Result;
 
 /// Inbox manager for managing received messages
 pub struct InboxManager {
@@ -15,11 +14,8 @@ pub struct InboxManager {
 
 impl InboxManager {
     /// Create a new inbox manager
-    pub fn new(pool: DbPool) -> Self {
-        let repository = SqlxInboxRepository::new(pool);
-        Self {
-            repository: Arc::new(repository) as Arc<dyn InboxRepository>,
-        }
+    pub fn new(repository: Arc<dyn InboxRepository>) -> Self {
+        Self { repository }
     }
 
     /// Create a new inbox manager with a custom repository (for testing)

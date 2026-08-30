@@ -126,7 +126,9 @@ impl RsBrokerService {
     pub fn with_kafka(db_pool: rs_broker_db::DbPool, kafka_connected: bool) -> Self {
         let outbox_repo = SqlxOutboxRepository::new(db_pool.clone());
         let subscriber_repo = SqlxSubscriberRepository::new(db_pool.clone());
-        let dlq_handler = DlqHandler::new(db_pool.clone());
+        let dlq_handler = DlqHandler::new(std::sync::Arc::new(
+            rs_broker_db::SqlxDlqRepository::new(db_pool.clone()),
+        ));
         let (event_sender, _) = broadcast::channel(1024);
         Self {
             db_pool,

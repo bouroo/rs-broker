@@ -2,9 +2,9 @@
 // Run with: cargo bench --package rs-broker-core
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use rs_broker_core::features::subscription::Subscriber;
 use rs_broker_core::inbox::dedup::Deduplicator;
 use rs_broker_core::topic::matches_topic;
-use rs_broker_db::Subscriber;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;

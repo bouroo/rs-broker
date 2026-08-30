@@ -1,4 +1,5 @@
-//! Outbox publisher - Background worker for publishing messages
+//! Outbox publisher - Background use case that drains pending outbox messages
+//! to the configured [`MessageSink`].
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,47 +7,34 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::error::Result;
-use crate::outbox::RetryStrategy;
+use crate::features::publishing::{
+    ports::{MessageSink, OutboundMessage, OutboxRepository},
+    retry::RetryStrategy,
+};
+use crate::shared::error::Result;
 use rs_broker_config::RetryConfig;
-use rs_broker_db::outbox::repository::SqlxOutboxRepository;
-use rs_broker_db::{DbPool, OutboxRepository};
-use rs_broker_kafka::{KafkaProducer, ProducerMessage};
 
 /// Outbox publisher - Background worker that publishes pending messages
 pub struct OutboxPublisher {
     repository: Arc<dyn OutboxRepository>,
-    producer: Arc<KafkaProducer>,
+    sink: Arc<dyn MessageSink>,
     retry_strategy: RetryStrategy,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
 impl OutboxPublisher {
-    /// Create a new publisher with its own Kafka producer built from the config.
+    /// Create a new publisher over the given repository port and outbound
+    /// message sink.
     pub fn new(
-        pool: DbPool,
-        kafka_config: rs_broker_config::KafkaConfig,
+        repository: Arc<dyn OutboxRepository>,
+        sink: Arc<dyn MessageSink>,
         retry_config: RetryConfig,
     ) -> Result<Self> {
-        let producer = Arc::new(KafkaProducer::new(&kafka_config)?);
-        Self::with_producer(pool, producer, retry_config)
-    }
-
-    /// Create a new publisher that reuses a pre-built, shared Kafka producer.
-    ///
-    /// Use this when the producer must be shared with other components
-    /// (e.g. health checks) so it is constructed only once.
-    pub fn with_producer(
-        pool: DbPool,
-        producer: Arc<KafkaProducer>,
-        retry_config: RetryConfig,
-    ) -> Result<Self> {
-        let repository = Arc::new(SqlxOutboxRepository::new(pool));
         let retry_strategy = RetryStrategy::new(retry_config);
 
         Ok(Self {
             repository,
-            producer,
+            sink,
             retry_strategy,
             shutdown_tx: None,
         })
@@ -58,7 +46,7 @@ impl OutboxPublisher {
         self.shutdown_tx = Some(tx);
 
         let repository = self.repository.clone();
-        let producer = self.producer.clone();
+        let sink = self.sink.clone();
         let retry_strategy = self.retry_strategy.clone();
 
         tokio::spawn(async move {
@@ -69,7 +57,7 @@ impl OutboxPublisher {
                     _ = interval.tick() => {
                         if let Err(e) = Self::publish_pending(
                             repository.as_ref(),
-                            &producer,
+                            sink.as_ref(),
                             &retry_strategy,
                             batch_size,
                         ).await {
@@ -87,7 +75,7 @@ impl OutboxPublisher {
 
     async fn publish_pending(
         repository: &dyn OutboxRepository,
-        producer: &Arc<KafkaProducer>,
+        sink: &dyn MessageSink,
         retry_strategy: &RetryStrategy,
         batch_size: i64,
     ) -> Result<()> {
@@ -96,20 +84,19 @@ impl OutboxPublisher {
         for message in pending {
             let payload = serde_json::to_vec(&message.payload)?;
 
-            let producer_msg = ProducerMessage {
+            let outbound = OutboundMessage {
                 topic: message.topic.clone(),
                 key: message.partition_key.clone(),
                 payload,
                 partition: None,
-                headers: None,
             };
 
-            // Attempt to send to Kafka. On failure, apply retry strategy:
+            // Attempt to send to the sink. On failure, apply retry strategy:
             //   - If retries remain, increment retry count and set `retrying`.
             //   - If retries exhausted, set to `failed` or route to DLQ.
             let attempt = message.retry_count as u32;
 
-            if let Err(e) = producer.send(producer_msg) {
+            if let Err(e) = sink.send(outbound) {
                 warn!(
                     "Failed to send message {} (attempt {}): {}",
                     message.id,
@@ -146,15 +133,14 @@ impl OutboxPublisher {
                         // Route to DLQ topic.
                         let dlq_topic = retry_strategy.dlq_topic();
                         let dlq_payload = serde_json::to_vec(&message.payload)?;
-                        let dlq_msg = ProducerMessage {
+                        let dlq_outbound = OutboundMessage {
                             topic: dlq_topic.to_string(),
                             key: message.partition_key.clone(),
                             payload: dlq_payload,
                             partition: None,
-                            headers: None,
                         };
 
-                        if let Err(dlq_err) = producer.send(dlq_msg) {
+                        if let Err(dlq_err) = sink.send(dlq_outbound) {
                             error!(
                                 "Failed to send message {} to DLQ topic {}: {}",
                                 message.id, dlq_topic, dlq_err
@@ -164,7 +150,7 @@ impl OutboxPublisher {
                         if let Err(db_err) = repository
                             .update_status(
                                 message.id,
-                                rs_broker_db::outbox::entity::MessageStatus::Dlq,
+                                crate::features::publishing::domain::MessageStatus::Dlq,
                                 Some(format!("exhausted {attempt} retries; last error: {e}")),
                             )
                             .await
@@ -178,7 +164,7 @@ impl OutboxPublisher {
                         if let Err(db_err) = repository
                             .update_status(
                                 message.id,
-                                rs_broker_db::outbox::entity::MessageStatus::Failed,
+                                crate::features::publishing::domain::MessageStatus::Failed,
                                 Some(format!("exhausted {attempt} retries; last error: {e}")),
                             )
                             .await

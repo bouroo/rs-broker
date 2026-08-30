@@ -4,9 +4,11 @@
 use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_config::RetryConfig;
+use rs_broker_core::features::publishing::{
+    MessageStatus, OutboxError, OutboxMessage, OutboxRepository,
+};
 use rs_broker_core::outbox::manager::OutboxManager;
-use rs_broker_db::outbox::entity::{MessageStatus, OutboxMessage};
-use rs_broker_db::outbox::repository::OutboxError;
+
 use serde_json::json;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
@@ -25,7 +27,7 @@ impl MockOutboxRepository {
 }
 
 #[async_trait]
-impl rs_broker_db::outbox::repository::OutboxRepository for MockOutboxRepository {
+impl OutboxRepository for MockOutboxRepository {
     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError> {
         let mut guard = self.messages.lock().unwrap();
         guard.insert(message.id, message.clone());

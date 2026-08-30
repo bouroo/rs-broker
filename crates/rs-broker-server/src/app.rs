@@ -8,11 +8,15 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
+use rs_broker_core::features::subscription::ports::SubscriberRepository;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 use rs_broker_core::grpc_client::dispatcher::SubscriberDispatcher;
 use rs_broker_core::inbox::{Dispatcher, InboxManager};
 use rs_broker_core::outbox::OutboxPublisher;
-use rs_broker_db::{create_pool, run_migrations};
+use rs_broker_db::{
+    create_pool, run_migrations, SqlxInboxRepository, SqlxOutboxRepository,
+    SqlxSubscriberRepository,
+};
 use rs_broker_kafka::{KafkaConsumer, KafkaProducer};
 use rs_broker_proto::rsbroker::{rs_broker_server::RsBrokerServer, DeliverEvent};
 
@@ -106,9 +110,19 @@ impl AppBuilder {
 
         let grpc_service = RsBrokerServer::new(grpc_service_inner);
 
-        // Build the outbox publisher that drains pending messages to Kafka.
-        let publisher =
-            OutboxPublisher::with_producer(db_pool.clone(), producer, settings.retry.clone())?;
+        // Build the outbox publisher over its ports: the sqlx outbox adapter
+        // and the Kafka message sink. Composition happens here (the
+        // composition root), never inside the use case.
+        let publisher = OutboxPublisher::new(
+            Arc::new(SqlxOutboxRepository::new(db_pool.clone()))
+                as std::sync::Arc<
+                    dyn rs_broker_core::features::publishing::ports::OutboxRepository,
+                >,
+            Arc::new(rs_broker_kafka::KafkaMessageSink::new(Arc::clone(
+                &producer,
+            ))),
+            settings.retry.clone(),
+        )?;
 
         // Build the Kafka consumer if topics are configured.
         let consumer = if settings.kafka.consumer.topics.is_empty() {
@@ -254,9 +268,11 @@ impl App {
         // Start the consumer pipeline if a consumer is available.
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         if let Some(consumer) = consumer {
-            let inbox_mgr = InboxManager::new(db_pool.clone());
+            let subscriber_repo: std::sync::Arc<dyn SubscriberRepository> =
+                Arc::new(SqlxSubscriberRepository::new(db_pool.clone()));
+            let inbox_mgr = InboxManager::new(Arc::new(SqlxInboxRepository::new(db_pool.clone())));
             let dispatcher = {
-                let sd = Arc::new(SubscriberDispatcher::new(db_pool.clone()));
+                let sd = Arc::new(SubscriberDispatcher::new(Arc::clone(&subscriber_repo)));
                 // Seed the endpoint cache before any dispatch can occur;
                 // without this the fan-out path matches an empty map and
                 // delivers to nobody until the first periodic refresh.
@@ -267,7 +283,7 @@ impl App {
                     );
                 }
                 spawn_subscriber_refresh(sd.clone());
-                Dispatcher::with_subscriber_dispatcher(db_pool, sd)
+                Dispatcher::with_subscriber_dispatcher(subscriber_repo, sd)
             };
             spawn_consumer_loop(consumer, inbox_mgr, dispatcher, event_sender);
         }

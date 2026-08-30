@@ -5,44 +5,8 @@ use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use super::entity::DlqMessage;
-
-/// Error type for DLQ repository operations
-#[derive(Debug, thiserror::Error)]
-pub enum DlqError {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Message not found: {0}")]
-    NotFound(Uuid),
-}
-
-/// DLQ repository trait
-#[async_trait]
-pub trait DlqRepository: Send + Sync {
-    /// Create a new DLQ message
-    async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
-
-    /// Get a DLQ message by ID
-    async fn get_by_id(&self, id: Uuid) -> Result<DlqMessage, DlqError>;
-
-    /// Get all DLQ messages with optional filters
-    async fn get_all(
-        &self,
-        topic: Option<&str>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<DlqMessage>, DlqError>;
-
-    /// Count DLQ messages
-    async fn count(&self, topic: Option<&str>) -> Result<i64, DlqError>;
-
-    /// Delete a DLQ message
-    async fn delete(&self, id: Uuid) -> Result<(), DlqError>;
-
-    /// Delete all DLQ messages
-    async fn delete_all(&self) -> Result<(), DlqError>;
-}
+pub use rs_broker_core::features::dead_letter::ports::{DlqError, DlqRepository};
+use rs_broker_core::features::dead_letter::DlqMessage;
 
 /// SQLx-based DLQ repository
 pub struct SqlxDlqRepository {
@@ -79,7 +43,8 @@ impl DlqRepository for SqlxDlqRepository {
         .bind(&message.headers)
         .bind(message.created_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -88,7 +53,8 @@ impl DlqRepository for SqlxDlqRepository {
         let row = sqlx::query_as::<_, DlqMessageRow>("SELECT * FROM dlq_messages WHERE id = $1")
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -107,7 +73,7 @@ impl DlqRepository for SqlxDlqRepository {
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(&self.pool)
-                .await?
+                .await.map_err(storage)?
         } else {
             sqlx::query_as::<_, DlqMessageRow>(
                 "SELECT * FROM dlq_messages ORDER BY created_at DESC LIMIT $1 OFFSET $2",
@@ -115,7 +81,8 @@ impl DlqRepository for SqlxDlqRepository {
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
-            .await?
+            .await
+            .map_err(storage)?
         };
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
@@ -126,11 +93,13 @@ impl DlqRepository for SqlxDlqRepository {
             sqlx::query_as("SELECT COUNT(*) FROM dlq_messages WHERE original_topic = $1")
                 .bind(t)
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(storage)?
         } else {
             sqlx::query_as("SELECT COUNT(*) FROM dlq_messages")
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(storage)?
         };
 
         Ok(count.0)
@@ -140,7 +109,8 @@ impl DlqRepository for SqlxDlqRepository {
         sqlx::query("DELETE FROM dlq_messages WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -148,7 +118,8 @@ impl DlqRepository for SqlxDlqRepository {
     async fn delete_all(&self) -> Result<(), DlqError> {
         sqlx::query("DELETE FROM dlq_messages")
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -176,7 +147,8 @@ impl DlqRepository for SqlxDlqRepository {
         .bind(&message.headers)
         .bind(message.created_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -185,7 +157,8 @@ impl DlqRepository for SqlxDlqRepository {
         let row = sqlx::query_as::<_, DlqMessageRow>("SELECT * FROM dlq_messages WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -204,7 +177,7 @@ impl DlqRepository for SqlxDlqRepository {
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(&self.pool)
-                .await?
+                .await.map_err(storage)?
         } else {
             sqlx::query_as::<_, DlqMessageRow>(
                 "SELECT * FROM dlq_messages ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -212,7 +185,8 @@ impl DlqRepository for SqlxDlqRepository {
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
-            .await?
+            .await
+            .map_err(storage)?
         };
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
@@ -223,11 +197,13 @@ impl DlqRepository for SqlxDlqRepository {
             sqlx::query_as("SELECT COUNT(*) FROM dlq_messages WHERE original_topic = ?")
                 .bind(t)
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(storage)?
         } else {
             sqlx::query_as("SELECT COUNT(*) FROM dlq_messages")
                 .fetch_one(&self.pool)
-                .await?
+                .await
+                .map_err(storage)?
         };
 
         Ok(count.0)
@@ -237,7 +213,8 @@ impl DlqRepository for SqlxDlqRepository {
         sqlx::query("DELETE FROM dlq_messages WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -245,7 +222,8 @@ impl DlqRepository for SqlxDlqRepository {
     async fn delete_all(&self) -> Result<(), DlqError> {
         sqlx::query("DELETE FROM dlq_messages")
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -279,4 +257,7 @@ impl From<DlqMessageRow> for DlqMessage {
             created_at: row.created_at,
         }
     }
+}
+fn storage(e: sqlx::Error) -> rs_broker_core::features::dead_letter::ports::DlqError {
+    rs_broker_core::features::dead_letter::ports::DlqError::Database(e.to_string())
 }

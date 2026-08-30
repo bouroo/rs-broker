@@ -1,27 +1,26 @@
-//! Core error types
+//! Core error type
 
 use thiserror::Error;
+
+use crate::features::{
+    consuming::ports::InboxError, dead_letter::ports::DlqError, publishing::ports::OutboxError,
+    subscription::ports::SubscriberError,
+};
 
 /// Core error type
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
     #[error("Outbox error: {0}")]
-    Outbox(#[from] rs_broker_db::outbox::repository::OutboxError),
+    Outbox(#[from] OutboxError),
 
     #[error("Inbox error: {0}")]
-    Inbox(#[from] rs_broker_db::inbox::repository::InboxError),
+    Inbox(#[from] InboxError),
 
     #[error("DLQ error: {0}")]
-    Dlq(#[from] rs_broker_db::dlq::repository::DlqError),
+    Dlq(#[from] DlqError),
 
     #[error("Subscriber error: {0}")]
-    Subscriber(#[from] rs_broker_db::subscriber::repository::SubscriberError),
-
-    #[error("Kafka error: {0}")]
-    Kafka(#[from] rs_broker_kafka::KafkaError),
+    Subscriber(#[from] SubscriberError),
 
     #[error("Configuration error: {0}")]
     Config(#[from] rs_broker_config::settings::ConfigError),

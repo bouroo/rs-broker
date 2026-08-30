@@ -1,4 +1,4 @@
-//! Subscriber entity types
+//! Subscription domain: the subscriber entity.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

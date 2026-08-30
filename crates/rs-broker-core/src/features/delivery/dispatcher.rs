@@ -10,9 +10,10 @@ use tonic::Status;
 
 use super::channel_pool::{ChannelPool, ChannelPoolConfig};
 
-use crate::error::{Error, Result};
-use crate::topic::matches_any;
-use rs_broker_db::{DbPool, SqlxSubscriberRepository, Subscriber, SubscriberRepository};
+use crate::features::subscription::ports::SubscriberRepository;
+use crate::features::subscription::Subscriber;
+use crate::shared::error::{Error, Result};
+use crate::shared::topic::matches_any;
 use rs_broker_proto::rsbroker::{
     rs_broker_callback_client::RsBrokerCallbackClient, DeliverRequest, DeliverResponse,
 };
@@ -201,8 +202,8 @@ const DEFAULT_FAN_OUT_CONCURRENCY: usize = 32;
 
 /// Subscriber dispatcher for delivering messages to subscribers
 pub struct SubscriberDispatcher {
-    /// Subscriber repository, built once at construction time
-    subscriber_repo: SqlxSubscriberRepository,
+    /// Subscriber repository port
+    subscriber_repo: Arc<dyn SubscriberRepository>,
     /// Subscriber endpoints cache
     endpoints: Arc<RwLock<HashMap<String, SubscriberEndpoint>>>,
     /// Timeout for individual delivery requests
@@ -216,9 +217,9 @@ pub struct SubscriberDispatcher {
 
 impl SubscriberDispatcher {
     /// Create a new subscriber dispatcher
-    pub fn new(db_pool: DbPool) -> Self {
+    pub fn new(subscriber_repo: Arc<dyn SubscriberRepository>) -> Self {
         Self {
-            subscriber_repo: SqlxSubscriberRepository::new(db_pool),
+            subscriber_repo,
             endpoints: Arc::new(RwLock::new(HashMap::new())),
             request_timeout: Duration::from_secs(10),
             channel_pool: Arc::new(ChannelPool::new(ChannelPoolConfig::default())),
@@ -528,7 +529,7 @@ mod tests {
     /// converted from a sequential loop to a concurrent stream.
     #[tokio::test]
     async fn dispatch_to_all_empty_subscriber_set_returns_empty_vec() {
-        let sd = SubscriberDispatcher::new(test_db_pool());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository());
         let results = sd
             .dispatch_to_all("no-such-topic", DeliverRequest::default())
             .await;
@@ -543,7 +544,7 @@ mod tests {
     /// to inspect (and tests can pin regressions on) the bound.
     #[tokio::test]
     async fn default_fan_out_concurrency_matches_documented_constant() {
-        let sd = SubscriberDispatcher::new(test_db_pool());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository());
         assert_eq!(sd.fan_out_concurrency(), DEFAULT_FAN_OUT_CONCURRENCY);
         assert!(sd.fan_out_concurrency() >= 1);
     }
@@ -559,7 +560,7 @@ mod tests {
     async fn dispatch_to_all_returns_one_fast_fail_result_per_subscriber() {
         use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
-        let sd = SubscriberDispatcher::new(test_db_pool());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository());
 
         // Three subscribers all matching topic "orders.created".
         let subs = vec![
@@ -631,7 +632,7 @@ mod tests {
     async fn merge_subscribers_preserves_circuit_breaker_state() {
         use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
-        let sd = SubscriberDispatcher::new(test_db_pool());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository());
         let s = Subscriber::new("svc-a".into(), "http://a:1".into(), vec!["orders.*".into()]);
         let id = s.id.to_string();
 
@@ -668,7 +669,7 @@ mod tests {
     /// insert brand-new ones, so the cache converges to the database snapshot.
     #[tokio::test]
     async fn merge_subscribers_removes_gone_and_adds_new() {
-        let sd = SubscriberDispatcher::new(test_db_pool());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository());
 
         let stale = Subscriber::new("svc-old".into(), "http://old:1".into(), vec!["*".into()]);
         {
@@ -694,16 +695,63 @@ mod tests {
         );
     }
 
-    /// Synthetic DB pool that satisfies the `DbPool` shape used by
-    /// `SubscriberDispatcher::new` without ever opening a real database
-    /// connection. `connect_lazy` defers the TCP connect until the first
-    /// query; the empty-subscriber-set and circuit-breaker fast-fail tests
-    /// never query the pool, so the URL is never contacted.
-    fn test_db_pool() -> DbPool {
-        use sqlx::postgres::PgPoolOptions;
-        PgPoolOptions::new()
-            .max_connections(1)
-            .connect_lazy("postgres://localhost/none")
-            .expect("lazy pg pool")
+    /// In-memory subscriber-repository stub for tests that never hit the
+    /// transport or persistence paths: `load_subscribers` is only exercised by
+    /// `refresh_subscribers`, which these tests do not call. Every test
+    /// replaces `test_db_pool`; the port stub keeps the use case free of any
+    /// sqlx dependency in its constructor (clean-architecture inversion).
+    fn test_subscriber_repository() -> Arc<dyn SubscriberRepository> {
+        struct NeverQueried;
+
+        #[async_trait::async_trait]
+        impl SubscriberRepository for NeverQueried {
+            async fn create(
+                &self,
+                _s: &Subscriber,
+            ) -> std::result::Result<(), crate::features::subscription::ports::SubscriberError>
+            {
+                unreachable!("test stub must not be queried")
+            }
+            async fn get_by_id(
+                &self,
+                _id: uuid::Uuid,
+            ) -> std::result::Result<
+                Subscriber,
+                crate::features::subscription::ports::SubscriberError,
+            > {
+                unreachable!("test stub must not be queried")
+            }
+            async fn get_all_active(
+                &self,
+            ) -> std::result::Result<
+                Vec<Subscriber>,
+                crate::features::subscription::ports::SubscriberError,
+            > {
+                Ok(Vec::new())
+            }
+            async fn update(
+                &self,
+                _s: &Subscriber,
+            ) -> std::result::Result<(), crate::features::subscription::ports::SubscriberError>
+            {
+                unreachable!("test stub must not be queried")
+            }
+            async fn delete(
+                &self,
+                _id: uuid::Uuid,
+            ) -> std::result::Result<(), crate::features::subscription::ports::SubscriberError>
+            {
+                unreachable!("test stub must not be queried")
+            }
+            async fn deactivate(
+                &self,
+                _id: uuid::Uuid,
+            ) -> std::result::Result<(), crate::features::subscription::ports::SubscriberError>
+            {
+                unreachable!("test stub must not be queried")
+            }
+        }
+
+        Arc::new(NeverQueried)
     }
 }

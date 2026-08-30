@@ -1,4 +1,4 @@
-//! Outbox entity types
+//! Publishing domain: the outbox message entity and its status ladder.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

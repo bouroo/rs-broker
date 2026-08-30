@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
+use super::{ports::SubscriberRepository, Subscriber};
 use crate::error::Result;
-use rs_broker_db::subscriber::repository::SqlxSubscriberRepository;
-use rs_broker_db::{DbPool, Subscriber, SubscriberRepository};
 
 /// Subscriber registry for managing subscribers
 pub struct SubscriberRegistry {
@@ -15,11 +14,8 @@ pub struct SubscriberRegistry {
 
 impl SubscriberRegistry {
     /// Create a new subscriber registry
-    pub fn new(pool: DbPool) -> Self {
-        let repository = SqlxSubscriberRepository::new(pool);
-        Self {
-            repository: Arc::new(repository) as Arc<dyn SubscriberRepository>,
-        }
+    pub fn new(repository: Arc<dyn SubscriberRepository>) -> Self {
+        Self { repository }
     }
 
     /// Create a new subscriber registry with a custom repository (for testing)
