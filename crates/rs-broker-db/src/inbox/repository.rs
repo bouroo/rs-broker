@@ -68,12 +68,13 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, "offset", key, event_type,
+                id, message_id, topic, partition, "offset", key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
         )
+        .bind(message.id)
         .bind(message.id)
         .bind(&message.topic)
         .bind(message.partition)
@@ -166,12 +167,13 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, `offset`, key, event_type,
+                id, message_id, topic, partition, `offset`, key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
+        .bind(message.id)
         .bind(message.id)
         .bind(&message.topic)
         .bind(message.partition)
