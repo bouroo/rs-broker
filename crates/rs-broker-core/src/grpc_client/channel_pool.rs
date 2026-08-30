@@ -72,14 +72,27 @@ impl ChannelPool {
         // Normalize the endpoint URL
         let normalized_endpoint = self.normalize_endpoint(endpoint);
 
-        // Get or create the pool for this endpoint
+        // Get or create the pool for this endpoint. The miss path re-checks
+        // under the write lock via `entry` so a concurrently created pool is
+        // never overwritten (whose buffered channels would be dropped).
         let endpoint_pool = {
             let pools = self.pools.read().await;
             pools.get(&normalized_endpoint).cloned()
         };
 
-        if let Some(pool) = endpoint_pool {
-            let mut pool_guard = pool.lock().await;
+        let endpoint_pool = match endpoint_pool {
+            Some(pool) => pool,
+            None => {
+                let mut pools = self.pools.write().await;
+                pools
+                    .entry(normalized_endpoint.clone())
+                    .or_insert_with(|| Arc::new(Mutex::new(Vec::new())))
+                    .clone()
+            }
+        };
+
+        {
+            let mut pool_guard = endpoint_pool.lock().await;
 
             // Remove expired channels
             pool_guard.retain(|ch| !ch.is_expired(self.config.idle_timeout));
@@ -89,16 +102,9 @@ impl ChannelPool {
                 drop(pool_guard); // Release the lock before returning
                 return Ok(pooled_channel.channel);
             }
-        } else {
-            // Create new pool for this endpoint
-            let new_pool = Arc::new(Mutex::new(Vec::new()));
-            {
-                let mut pools = self.pools.write().await;
-                pools.insert(normalized_endpoint.clone(), new_pool.clone());
-            }
         }
 
-        // Create a new channel
+        // Pool empty: create a new channel
         let channel = self.create_channel(&normalized_endpoint).await?;
         Ok(channel)
     }
@@ -111,29 +117,28 @@ impl ChannelPool {
     pub async fn put_channel(&self, endpoint: &str, channel: Channel) -> Result<(), ()> {
         let normalized_endpoint = self.normalize_endpoint(endpoint);
 
+        // Same read-first/entry-on-miss discipline as `get_channel`: never
+        // overwrite a pool another caller just installed, or its channels leak.
         let endpoint_pool = {
             let pools = self.pools.read().await;
             pools.get(&normalized_endpoint).cloned()
         };
 
-        if let Some(pool) = endpoint_pool {
-            let mut pool_guard = pool.lock().await;
+        let endpoint_pool = match endpoint_pool {
+            Some(pool) => pool,
+            None => {
+                let mut pools = self.pools.write().await;
+                pools
+                    .entry(normalized_endpoint.clone())
+                    .or_insert_with(|| Arc::new(Mutex::new(Vec::new())))
+                    .clone()
+            }
+        };
 
-            // Only add back to pool if we haven't exceeded the limit
-            if pool_guard.len() < self.config.max_channels_per_endpoint {
-                pool_guard.push(PooledChannel::new(channel));
-            }
-        } else {
-            // No pool for this endpoint yet — create one and store the channel.
-            let new_pool = Arc::new(Mutex::new(Vec::new()));
-            {
-                let mut pool_guard = new_pool.lock().await;
-                if pool_guard.len() < self.config.max_channels_per_endpoint {
-                    pool_guard.push(PooledChannel::new(channel));
-                }
-            }
-            let mut pools = self.pools.write().await;
-            pools.insert(normalized_endpoint, new_pool);
+        // Only add back to pool if we haven't exceeded the limit
+        let mut pool_guard = endpoint_pool.lock().await;
+        if pool_guard.len() < self.config.max_channels_per_endpoint {
+            pool_guard.push(PooledChannel::new(channel));
         }
 
         Ok(())
@@ -226,4 +231,47 @@ mod tests {
     // after, on success and error) is verified by the existing integration
     // tests and by the `SubscriberDispatcher::deliver_to_endpoint` change in
     // this unit.
+
+    /// Regression for the put/get channel-pool TOCTOU: concurrent cold-path
+    /// callers raced an unconditional `pools.insert`, and the last writer
+    /// replaced the map entry — silently dropping every channel the earlier
+    /// callers had stored. The `Barrier` forces all callers through the
+    /// miss branch simultaneously, so `entry().or_insert_with` must be the
+    /// only writer.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn concurrent_cold_put_channels_are_not_dropped() {
+        let pool = Arc::new(ChannelPool::default());
+        let endpoint = "http://race.invalid:1";
+        let barrier = Arc::new(tokio::sync::Barrier::new(16));
+
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let pool = Arc::clone(&pool);
+                let endpoint = endpoint.to_string();
+                let barrier = Arc::clone(&barrier);
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    let ch = Channel::from_shared(format!("{endpoint}#"))
+                        .unwrap()
+                        .connect_lazy();
+                    pool.put_channel(&endpoint, ch).await.unwrap();
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // max_channels_per_endpoint is 10 by default. Under the old
+        // insert-overwrite race the surviving map entry was the last writer's
+        // freshly created pool, so the size landed well below the cap
+        // non-deterministically; with the entry fix every lost race simply
+        // adopts the winner's pool and the cap is always reached.
+        assert_eq!(
+            pool.pool_size(endpoint).await,
+            pool.config.max_channels_per_endpoint,
+            "concurrent puts must fill the pool to capacity, none lost"
+        );
+    }
 }
