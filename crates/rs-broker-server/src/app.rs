@@ -8,11 +8,15 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
+use rs_broker_core::features::subscription::ports::SubscriberRepository;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 use rs_broker_core::grpc_client::dispatcher::SubscriberDispatcher;
 use rs_broker_core::inbox::{Dispatcher, InboxManager};
 use rs_broker_core::outbox::OutboxPublisher;
-use rs_broker_db::{create_pool, run_migrations};
+use rs_broker_db::{
+    create_pool, run_migrations, SqlxInboxRepository, SqlxOutboxRepository,
+    SqlxSubscriberRepository,
+};
 use rs_broker_kafka::{KafkaConsumer, KafkaProducer};
 use rs_broker_proto::rsbroker::{rs_broker_server::RsBrokerServer, DeliverEvent};
 
@@ -106,9 +110,19 @@ impl AppBuilder {
 
         let grpc_service = RsBrokerServer::new(grpc_service_inner);
 
-        // Build the outbox publisher that drains pending messages to Kafka.
-        let publisher =
-            OutboxPublisher::with_producer(db_pool.clone(), producer, settings.retry.clone())?;
+        // Build the outbox publisher over its ports: the sqlx outbox adapter
+        // and the Kafka message sink. Composition happens here (the
+        // composition root), never inside the use case.
+        let publisher = OutboxPublisher::new(
+            Arc::new(SqlxOutboxRepository::new(db_pool.clone()))
+                as std::sync::Arc<
+                    dyn rs_broker_core::features::publishing::ports::OutboxRepository,
+                >,
+            Arc::new(rs_broker_kafka::KafkaMessageSink::new(Arc::clone(
+                &producer,
+            ))),
+            settings.retry.clone(),
+        )?;
 
         // Build the Kafka consumer if topics are configured.
         let consumer = if settings.kafka.consumer.topics.is_empty() {
@@ -254,10 +268,26 @@ impl App {
         // Start the consumer pipeline if a consumer is available.
         #[cfg(any(feature = "postgres", feature = "mysql"))]
         if let Some(consumer) = consumer {
-            let inbox_mgr = InboxManager::new(db_pool.clone());
+            let subscriber_repo: std::sync::Arc<dyn SubscriberRepository> =
+                Arc::new(SqlxSubscriberRepository::new(db_pool.clone()));
+            let inbox_mgr = InboxManager::new(Arc::new(SqlxInboxRepository::new(db_pool.clone())));
             let dispatcher = {
-                let sd = Arc::new(SubscriberDispatcher::new(db_pool.clone()));
-                Dispatcher::with_subscriber_dispatcher(db_pool, sd)
+                let notifier = Arc::new(crate::adapters::callback::GrpcSubscriberNotifier::new());
+                let sd = Arc::new(SubscriberDispatcher::new(
+                    Arc::clone(&subscriber_repo),
+                    notifier,
+                ));
+                // Seed the endpoint cache before any dispatch can occur;
+                // without this the fan-out path matches an empty map and
+                // delivers to nobody until the first periodic refresh.
+                if let Err(e) = sd.refresh_subscribers().await {
+                    tracing::warn!(
+                        "Initial subscriber refresh failed: {}. Fan-out stays disabled until it succeeds.",
+                        e
+                    );
+                }
+                spawn_subscriber_refresh(sd.clone());
+                Dispatcher::with_subscriber_dispatcher(subscriber_repo, sd)
             };
             spawn_consumer_loop(consumer, inbox_mgr, dispatcher, event_sender);
         }
@@ -286,6 +316,33 @@ impl App {
 
 /// Spawn the consumer loop that reads from Kafka and stores messages in the inbox,
 /// dispatches to subscribers, and broadcasts events for streaming subscribers.
+/// How often the gRPC fan-out dispatcher refreshes its subscriber cache from
+/// the database. Without periodic refresh the endpoint cache would stay empty
+/// (or stale) forever: `SubscriberDispatcher` never populates it on its own.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+const SUBSCRIBER_REFRESH_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+
+/// Spawn a background task that periodically merges active subscribers into
+/// the dispatcher's endpoint cache. Errors are logged, never fatal: a failed
+/// refresh keeps the previous snapshot.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+fn spawn_subscriber_refresh(sd: std::sync::Arc<SubscriberDispatcher>) {
+    tokio::spawn(async move {
+        // The immediate first tick of a fresh interval is consumed: the
+        // startup refresh (in `run`) already seeded the cache.
+        let mut interval = tokio::time::interval(SUBSCRIBER_REFRESH_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            if let Err(e) = sd.refresh_subscribers().await {
+                tracing::warn!("Subscriber refresh failed, keeping last snapshot: {}", e);
+            }
+        }
+    });
+}
+
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 fn spawn_consumer_loop(
     consumer: KafkaConsumer,

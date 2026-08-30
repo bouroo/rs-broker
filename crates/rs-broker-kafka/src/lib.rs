@@ -3,12 +3,14 @@
 //! This crate provides Kafka producer and consumer abstractions for the rs-broker
 //! message broker.
 
+pub mod adapters;
 pub mod config;
 pub mod consumer;
 pub mod error;
 pub mod headers;
 pub mod producer;
 
+pub use adapters::KafkaMessageSink;
 pub use config::create_consumer;
 pub use config::create_consumer_config;
 pub use config::create_producer;

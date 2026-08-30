@@ -3,14 +3,16 @@
 
 use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use rs_broker_db::outbox::entity::{MessageStatus, OutboxMessage};
-use rs_broker_db::outbox::repository::{OutboxError, OutboxRepository};
+use rs_broker_core::features::publishing::{
+    MessageStatus, OutboundMessage, OutboxMessage, SinkError,
+};
+use rs_broker_core::features::publishing::{OutboxError, OutboxRepository};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-/// Mock Kafka producer for testing
+/// Mock message sink (stands in for the Kafka adapter)
 struct MockKafkaProducer;
 
 impl MockKafkaProducer {
@@ -18,10 +20,7 @@ impl MockKafkaProducer {
         Self
     }
 
-    fn send(
-        &self,
-        _message: rs_broker_kafka::ProducerMessage,
-    ) -> Result<(), rs_broker_kafka::KafkaError> {
+    fn send(&self, _message: OutboundMessage) -> Result<(), SinkError> {
         Ok(())
     }
 }
@@ -53,8 +52,8 @@ impl MockOutboxRepository {
                 aggregate_id: Uuid::now_v7().to_string(),
                 event_type: "user.created".to_string(),
                 payload: json!({"id": Uuid::now_v7().to_string(), "name": "John"}),
-                headers: None,
                 topic: "user.events".to_string(),
+                headers: None,
                 partition_key: Some(Uuid::now_v7().to_string()),
                 status: MessageStatus::Pending,
                 retry_count: 0,
@@ -174,12 +173,11 @@ fn bench_publisher_single(c: &mut Criterion) {
                 for message in pending {
                     let payload = serde_json::to_vec(&message.payload).unwrap();
 
-                    let producer_msg = rs_broker_kafka::ProducerMessage {
+                    let producer_msg = OutboundMessage {
                         topic: message.topic.clone(),
                         key: message.partition_key.clone(),
                         payload,
                         partition: None,
-                        headers: None,
                     };
 
                     if let Err(_e) = mock_producer.send(producer_msg) {
@@ -226,12 +224,11 @@ fn bench_publisher_batch(c: &mut Criterion) {
                     for message in pending {
                         let payload = serde_json::to_vec(&message.payload).unwrap();
 
-                        let producer_msg = rs_broker_kafka::ProducerMessage {
+                        let producer_msg = OutboundMessage {
                             topic: message.topic.clone(),
                             key: message.partition_key.clone(),
                             payload,
                             partition: None,
-                            headers: None,
                         };
 
                         if let Err(_e) = mock_producer.send(producer_msg) {
@@ -290,12 +287,11 @@ fn bench_publisher_concurrent(c: &mut Criterion) {
                             for message in pending {
                                 let payload = serde_json::to_vec(&message.payload).unwrap();
 
-                                let producer_msg = rs_broker_kafka::ProducerMessage {
+                                let producer_msg = OutboundMessage {
                                     topic: message.topic.clone(),
                                     key: message.partition_key.clone(),
                                     payload,
                                     partition: None,
-                                    headers: None,
                                 };
 
                                 if let Err(_e) = producer.send(producer_msg) {
@@ -376,12 +372,11 @@ fn bench_publisher_with_serialization(c: &mut Criterion) {
                 for message in pending {
                     let payload = serde_json::to_vec(&message.payload).unwrap(); // This is the serialization
 
-                    let producer_msg = rs_broker_kafka::ProducerMessage {
+                    let producer_msg = OutboundMessage {
                         topic: message.topic.clone(),
                         key: message.partition_key.clone(),
                         payload,
                         partition: None,
-                        headers: None,
                     };
 
                     if let Err(_e) = mock_producer.send(producer_msg) {
@@ -422,12 +417,11 @@ fn bench_publisher_mock_kafka(c: &mut Criterion) {
                 for message in pending {
                     let payload = serde_json::to_vec(&message.payload).unwrap();
 
-                    let producer_msg = rs_broker_kafka::ProducerMessage {
+                    let producer_msg = OutboundMessage {
                         topic: message.topic.clone(),
                         key: message.partition_key.clone(),
                         payload,
                         partition: None,
-                        headers: None,
                     };
 
                     if let Err(_e) = mock_producer.send(producer_msg) {

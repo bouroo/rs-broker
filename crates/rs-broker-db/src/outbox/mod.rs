@@ -1,7 +1,12 @@
-//! Outbox module
+//! Outbox persistence adapter.
+//!
+//! The outbox domain lives in `rs-broker-core::features::publishing`; this
+//! module implements its repository port with sqlx.
 
-pub mod entity;
 pub mod repository;
 
-pub use entity::{MessageStatus, OutboxMessage};
-pub use repository::OutboxRepository;
+pub use repository::SqlxOutboxRepository;
+
+pub use rs_broker_core::features::publishing::{
+    MessageStatus, OutboxError, OutboxMessage, OutboxRepository,
+};

@@ -108,22 +108,27 @@ Main server binary that wires everything together.
 crates/rs-broker-server/
 ├── Cargo.toml
 └── src/
-    ├── main.rs              # Entry point
-    ├── lib.rs               # Library exports
-    ├── server.rs            # Axum/gRPC server setup
-    ├── grpc_service.rs      # gRPC service implementation
-    └── shutdown.rs          # Graceful shutdown handling
+    ├── main.rs              # Entry point (composition root)
+    ├── lib.rs
+    ├── app.rs               # App builder + consumer/publisher/refresh loops
+    ├── adapters/
+    │   └── callback.rs      # GrpcSubscriberNotifier + ChannelPool (delivery port adapter)
+    ├── grpc/
+    │   ├── mod.rs
+    │   └── service.rs       # gRPC interface adapter (delegates to core use cases)
+    └── metrics.rs           # Prometheus metrics registry
 ```
 
 **Dependencies:**
-- All internal crates
+- All internal crates (composition root)
 - tonic, axum, tower
 - tracing
 
 **Purpose:**
-- Initialize and run the server
-- Wire up all components
-- Handle graceful shutdown
+- Interface-adapter layer: gRPC/HTTP presentation, proto<->DTO conversion
+- Compose the concrete adapters (sqlx repos, Kafka sink, gRPC notifier)
+  and inject the feature ports at startup
+- Initialize, wire up all components, graceful shutdown
 
 ### 2. rs-broker-core
 
@@ -133,50 +138,56 @@ Core business logic for inbox/outbox patterns.
 crates/rs-broker-core/
 ├── Cargo.toml
 ├── src/
-│   ├── lib.rs
-│   ├── topic.rs            # MQTT-standard topic pattern matching
-│   ├── error.rs            # Domain errors
-│   ├── outbox/
-│   │   ├── mod.rs
-│   │   ├── manager.rs      # Outbox business logic
-│   │   ├── publisher.rs    # Background publisher worker
-│   │   └── retry.rs        # Retry strategy implementation
-│   ├── inbox/
-│   │   ├── mod.rs
-│   │   ├── manager.rs      # Inbox business logic
-│   │   ├── dispatcher.rs   # Topic→subscriber dispatch with pattern cache
-│   │   └── dedup.rs        # Deduplication (atomic check_and_mark)
-│   ├── grpc_client/
-│   │   ├── mod.rs
-│   │   ├── channel_pool.rs # gRPC channel pool (connection reuse)
-│   │   └── dispatcher.rs   # SubscriberDispatcher (circuit breaker, concurrent fan-out)
-│   ├── dlq/
-│   │   ├── mod.rs
-│   │   └── handler.rs      # DLQ routing and management
-│   └── subscriber/
-│       ├── mod.rs
-│       └── registry.rs     # Subscriber registration
-└── benches/
-    ├── lib.rs              # Dedup, dispatch, pattern, registry benchmarks
-    ├── fan_out.rs          # Sequential vs concurrent fan-out
+│   ├── lib.rs                # Canonical re-exports + compat shims for old paths
+│   ├── shared/
+│   │   ├── error.rs          # Core error type (framework-free)
+│   │   └── topic.rs          # MQTT-standard topic pattern matching
+│   └── features/
+│       ├── publishing/       # The outbox write path
+│       │   ├── domain.rs     # OutboxMessage + status ladder + PublishFailureDecision
+│       │   ├── accept.rs     # AcceptMessage use case (validation + insert)
+│       │   ├── manager.rs    # Outbox bookkeeping use case
+│       │   ├── publisher.rs  # Background drain use case (over ports)
+│       │   ├── retry.rs      # Retry policy value
+│       │   └── ports.rs      # OutboxRepository + MessageSink ports
+│       ├── consuming/        # The inbox ingest path
+│       │   ├── domain.rs     # InboxMessage + transitions
+│       │   ├── use_cases.rs  # InboxManager
+│       │   ├── dispatcher.rs # Consumed-message dispatch with pattern cache
+│       │   ├── dedup.rs      # Deduplication (atomic check_and_mark)
+│       │   └── ports.rs      # InboxRepository port
+│       ├── subscription/     # Subscriber registry + matching
+│       │   ├── domain.rs     # Subscriber.matches_topic()
+│       │   ├── registry.rs   # SubscriberRegistry use case
+│       │   └── ports.rs      # SubscriberRepository port
+│       ├── delivery/         # Fan-out to subscribers
+│       │   ├── dispatcher.rs # Circuit breaker + bounded concurrent fan-out
+│       │   └── ports.rs      # SubscriberNotifier + transport-free DTOs
+│       └── dead_letter/      # DLQ routing and reprocessing
+│           ├── domain.rs     # DlqMessage
+│           ├── handler.rs    # DlqHandler use case
+│           └── ports.rs      # DlqRepository port
+└── benches/                  # Targets the same features (unchanged names)
+    ├── lib.rs                # Dedup, dispatch, pattern, registry benchmarks
+    ├── fan_out.rs # Sequential vs concurrent fan-out
     ├── dlq.rs
     ├── outbox_manager.rs
     ├── outbox_publisher.rs
     └── retry.rs
 ```
 
-**Dependencies:**
-- rs-broker-proto
-- rs-broker-db
-- rs-broker-kafka
-- rs-broker-config
-- tokio, async-trait, thiserror
+**Dependencies (no infrastructure):** none of rs-broker-db / rs-broker-kafka /
+rs-broker-proto / sqlx / tonic / rdkafka. Only `rs-broker-config` plus
+serde/uuid/chrono/tokio/tracing/async-trait — enforced by `cargo tree -p
+rs-broker-core` (the compiler rejects any infra import: no `?` on out-of-layer
+errors can compile).
 
 **Purpose:**
-- Implement outbox pattern logic
-- Implement inbox pattern logic
-- Handle retry strategies
-- Manage subscriber registry
+- Own the domain entities and their behaviour (status ladders, matching,
+  retry->DLQ->failed decision)
+- Own the use cases (accept publish, drain outbox, ingest inbox, fan out,
+  DLQ reprocess)
+- Declare the ports that infrastructure must implement
 
 ### 3. rs-broker-proto
 
@@ -207,35 +218,31 @@ crates/rs-broker-db/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
-    ├── pool.rs              # Connection pool management
+    ├── pool.rs              # Connection pool management (frameworks & drivers)
     ├── outbox/
     │   ├── mod.rs
-    │   ├── entity.rs        # Outbox entity types
-    │   └── repository.rs    # Outbox CRUD operations
+    │   └── repository.rs    # SqlxOutboxRepository: implements core's port
     ├── inbox/
     │   ├── mod.rs
-    │   ├── entity.rs        # Inbox entity types
-    │   └── repository.rs    # Inbox CRUD operations
+    │   └── repository.rs    # SqlxInboxRepository: implements core's port
     ├── subscriber/
     │   ├── mod.rs
-    │   ├── entity.rs        # Subscriber entity types
-    │   └── repository.rs    # Subscriber CRUD operations
+    │   └── repository.rs    # SqlxSubscriberRepository: implements core's port
     ├── dlq/
     │   ├── mod.rs
-    │   ├── entity.rs        # DLQ entity types
-    │   └── repository.rs    # DLQ CRUD operations
+    │   └── repository.rs    # SqlxDlqRepository: implements core's port
     └── migration.rs         # Migration utilities
 ```
 
 **Dependencies:**
+- rs-broker-core (adapter -> inward; provides the entities and repo ports)
 - sqlx (with postgres/mysql features)
 - serde, chrono, uuid
-- rs-broker-config
 
 **Purpose:**
-- Database connection management
-- Entity definitions
-- Repository pattern for data access
+- Database connection management and migrations
+- SQLx row mapping (`*Row` structs) and queries — the *only* SQL in the system
+- Implements `rs-broker-core` feature ports; entities live in the feature layer
 
 ### 5. rs-broker-kafka
 
@@ -260,12 +267,14 @@ crates/rs-broker-kafka/
 **Dependencies:**
 - rdkafka
 - tokio, futures
+- rs-broker-core (adapter -> inward; implements publishing's MessageSink port)
 - rs-broker-config
 
 **Purpose:**
-- Kafka producer abstraction
-- Kafka consumer abstraction
+- Kafka producer/consumer drivers
+- `KafkaMessageSink` adapter implementing `publishing::ports::MessageSink`
 - Header manipulation utilities
+- (The `rs-broker-proto` types cross the boundary in the server, not here.)
 
 ### 6. rs-broker-config
 

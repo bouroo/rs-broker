@@ -5,48 +5,8 @@ use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use super::entity::{InboxMessage, InboxStatus};
-
-/// Error type for inbox repository operations
-#[derive(Debug, thiserror::Error)]
-pub enum InboxError {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Message not found: {0}")]
-    NotFound(Uuid),
-}
-
-/// Inbox repository trait
-#[async_trait]
-pub trait InboxRepository: Send + Sync {
-    /// Create a new inbox message
-    async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
-
-    /// Get a message by ID
-    async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError>;
-
-    /// Get message by topic and offset for deduplication
-    async fn get_by_topic_offset(
-        &self,
-        topic: &str,
-        offset: i64,
-    ) -> Result<Option<InboxMessage>, InboxError>;
-
-    /// Update message status
-    async fn update_status(
-        &self,
-        id: Uuid,
-        status: InboxStatus,
-        error_message: Option<String>,
-    ) -> Result<(), InboxError>;
-
-    /// Mark message as processed
-    async fn mark_processed(&self, id: Uuid) -> Result<(), InboxError>;
-
-    /// Delete a message
-    async fn delete(&self, id: Uuid) -> Result<(), InboxError>;
-}
+pub use rs_broker_core::features::consuming::ports::{InboxError, InboxRepository};
+use rs_broker_core::features::consuming::{InboxMessage, InboxStatus};
 
 /// SQLx-based inbox repository
 pub struct SqlxInboxRepository {
@@ -68,12 +28,13 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, offset, key, event_type,
+                id, message_id, topic, partition, "offset", key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
         )
+        .bind(message.id)
         .bind(message.id)
         .bind(&message.topic)
         .bind(message.partition)
@@ -89,7 +50,8 @@ impl InboxRepository for SqlxInboxRepository {
         .bind(message.received_at)
         .bind(message.processed_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -99,7 +61,8 @@ impl InboxRepository for SqlxInboxRepository {
             sqlx::query_as::<_, InboxMessageRow>("SELECT * FROM inbox_messages WHERE id = $1")
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?;
+                .await
+                .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -110,12 +73,13 @@ impl InboxRepository for SqlxInboxRepository {
         offset: i64,
     ) -> Result<Option<InboxMessage>, InboxError> {
         let row = sqlx::query_as::<_, InboxMessageRow>(
-            "SELECT * FROM inbox_messages WHERE topic = $1 AND offset = $2",
+            "SELECT * FROM inbox_messages WHERE topic = $1 AND \"offset\" = $2",
         )
         .bind(topic)
         .bind(offset)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(row.map(|r| r.into()))
     }
@@ -133,7 +97,7 @@ impl InboxRepository for SqlxInboxRepository {
         .bind(&error_message)
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(())
     }
@@ -144,7 +108,8 @@ impl InboxRepository for SqlxInboxRepository {
         )
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -153,7 +118,8 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query("DELETE FROM inbox_messages WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -166,12 +132,13 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, offset, key, event_type,
+                id, message_id, topic, partition, `offset`, key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
+        .bind(message.id)
         .bind(message.id)
         .bind(&message.topic)
         .bind(message.partition)
@@ -187,7 +154,8 @@ impl InboxRepository for SqlxInboxRepository {
         .bind(message.received_at)
         .bind(message.processed_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -196,7 +164,8 @@ impl InboxRepository for SqlxInboxRepository {
         let row = sqlx::query_as::<_, InboxMessageRow>("SELECT * FROM inbox_messages WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -207,12 +176,13 @@ impl InboxRepository for SqlxInboxRepository {
         offset: i64,
     ) -> Result<Option<InboxMessage>, InboxError> {
         let row = sqlx::query_as::<_, InboxMessageRow>(
-            "SELECT * FROM inbox_messages WHERE topic = ? AND offset = ?",
+            "SELECT * FROM inbox_messages WHERE topic = ? AND `offset` = ?",
         )
         .bind(topic)
         .bind(offset)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(row.map(|r| r.into()))
     }
@@ -228,7 +198,7 @@ impl InboxRepository for SqlxInboxRepository {
             .bind(&error_message)
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await.map_err(storage)?;
 
         Ok(())
     }
@@ -239,7 +209,8 @@ impl InboxRepository for SqlxInboxRepository {
         )
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -248,7 +219,8 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query("DELETE FROM inbox_messages WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -298,4 +270,7 @@ impl From<InboxMessageRow> for InboxMessage {
             processed_at: row.processed_at,
         }
     }
+}
+fn storage(e: sqlx::Error) -> rs_broker_core::features::consuming::ports::InboxError {
+    rs_broker_core::features::consuming::ports::InboxError::Database(e.to_string())
 }

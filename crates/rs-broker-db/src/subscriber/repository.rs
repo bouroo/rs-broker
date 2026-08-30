@@ -7,39 +7,8 @@ use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use super::entity::Subscriber;
-
-/// Error type for subscriber repository operations
-#[derive(Debug, thiserror::Error)]
-pub enum SubscriberError {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Subscriber not found: {0}")]
-    NotFound(Uuid),
-}
-
-/// Subscriber repository trait
-#[async_trait]
-pub trait SubscriberRepository: Send + Sync {
-    /// Create a new subscriber
-    async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
-
-    /// Get a subscriber by ID
-    async fn get_by_id(&self, id: Uuid) -> Result<Subscriber, SubscriberError>;
-
-    /// Get all active subscribers
-    async fn get_all_active(&self) -> Result<Vec<Subscriber>, SubscriberError>;
-
-    /// Update a subscriber
-    async fn update(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
-
-    /// Delete a subscriber
-    async fn delete(&self, id: Uuid) -> Result<(), SubscriberError>;
-
-    /// Deactivate a subscriber
-    async fn deactivate(&self, id: Uuid) -> Result<(), SubscriberError>;
-}
+pub use rs_broker_core::features::subscription::ports::{SubscriberError, SubscriberRepository};
+use rs_broker_core::features::subscription::Subscriber;
 
 /// SQLx-based subscriber repository
 pub struct SqlxSubscriberRepository {
@@ -76,7 +45,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         .bind(subscriber.registered_at)
         .bind(subscriber.updated_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -85,7 +55,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         let row = sqlx::query_as::<_, SubscriberRow>("SELECT * FROM subscribers WHERE id = $1")
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -94,7 +65,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         let rows =
             sqlx::query_as::<_, SubscriberRow>("SELECT * FROM subscribers WHERE active = true")
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(storage)?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -119,7 +91,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         .bind(&subscriber.delivery_config)
         .bind(subscriber.id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -128,7 +101,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         sqlx::query("DELETE FROM subscribers WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -137,7 +111,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         sqlx::query("UPDATE subscribers SET active = false, updated_at = NOW() WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -169,7 +144,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         .bind(subscriber.registered_at)
         .bind(subscriber.updated_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -178,7 +154,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         let row = sqlx::query_as::<_, SubscriberRow>("SELECT * FROM subscribers WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -187,7 +164,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         let rows =
             sqlx::query_as::<_, SubscriberRow>("SELECT * FROM subscribers WHERE active = true")
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(storage)?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -217,7 +195,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         .bind(&subscriber.delivery_config)
         .bind(subscriber.id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -226,7 +205,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         sqlx::query("DELETE FROM subscribers WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -235,7 +215,8 @@ impl SubscriberRepository for SqlxSubscriberRepository {
         sqlx::query("UPDATE subscribers SET active = false, updated_at = NOW() WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -273,4 +254,7 @@ impl From<SubscriberRow> for Subscriber {
             updated_at: row.updated_at,
         }
     }
+}
+fn storage(e: sqlx::Error) -> rs_broker_core::features::subscription::ports::SubscriberError {
+    rs_broker_core::features::subscription::ports::SubscriberError::Database(e.to_string())
 }

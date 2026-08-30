@@ -4,8 +4,8 @@
 use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_core::dlq::handler::DlqHandler;
-use rs_broker_db::dlq::entity::DlqMessage;
-use rs_broker_db::dlq::repository::DlqError;
+use rs_broker_core::features::dead_letter::ports::DlqError;
+use rs_broker_core::features::dead_letter::DlqMessage;
 use serde_json::json;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
@@ -42,7 +42,7 @@ impl MockDlqRepository {
 }
 
 #[async_trait]
-impl rs_broker_db::dlq::repository::DlqRepository for MockDlqRepository {
+impl rs_broker_core::features::dead_letter::ports::DlqRepository for MockDlqRepository {
     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError> {
         let mut guard = self.messages.lock().unwrap();
         guard.insert(message.id, message.clone());
@@ -116,7 +116,7 @@ impl rs_broker_db::dlq::repository::DlqRepository for MockDlqRepository {
 /// Helper to create a test DLQ handler
 fn create_test_dlq_handler() -> DlqHandler {
     let mock_repo = std::sync::Arc::new(MockDlqRepository::new())
-        as std::sync::Arc<dyn rs_broker_db::dlq::repository::DlqRepository>;
+        as std::sync::Arc<dyn rs_broker_core::features::dead_letter::ports::DlqRepository>;
     DlqHandler::with_repository(mock_repo)
 }
 

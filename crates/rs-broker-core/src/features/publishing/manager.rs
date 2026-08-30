@@ -2,24 +2,17 @@
 
 use uuid::Uuid;
 
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-use super::retry::RetryStrategy;
-use crate::error::Result;
-#[cfg(any(feature = "postgres", feature = "mysql"))]
+use super::{domain::MessageStatus, retry::RetryStrategy, OutboxMessage};
+use crate::features::publishing::ports::OutboxRepository;
+use crate::shared::error::Result;
 use rs_broker_config::RetryConfig;
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-use rs_broker_db::outbox::entity::MessageStatus;
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-use rs_broker_db::{DbPool, OutboxMessage, OutboxRepository};
 
 /// Outbox manager for managing outbox messages
-#[cfg(any(feature = "postgres", feature = "mysql"))]
 pub struct OutboxManager {
     repository: std::sync::Arc<dyn OutboxRepository>,
     retry_strategy: RetryStrategy,
 }
 
-#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl Clone for OutboxManager {
     fn clone(&self) -> Self {
         Self {
@@ -29,7 +22,6 @@ impl Clone for OutboxManager {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl std::fmt::Debug for OutboxManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutboxManager")
@@ -39,16 +31,12 @@ impl std::fmt::Debug for OutboxManager {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "mysql"))]
 impl OutboxManager {
     /// Create a new outbox manager
-    pub fn new(pool: DbPool, retry_config: RetryConfig) -> Self {
-        let repository = {
-            use rs_broker_db::outbox::repository::SqlxOutboxRepository;
-            std::sync::Arc::new(SqlxOutboxRepository::new(pool))
-                as std::sync::Arc<dyn OutboxRepository>
-        };
-
+    pub fn new(
+        repository: std::sync::Arc<dyn OutboxRepository>,
+        retry_config: RetryConfig,
+    ) -> Self {
         Self {
             repository,
             retry_strategy: RetryStrategy::new(retry_config),

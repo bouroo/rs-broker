@@ -39,6 +39,7 @@ rs-broker-core = { workspace = true }
 rs-broker-db = { workspace = true }
 rs-broker-kafka = { workspace = true }
 rs-broker-proto = { workspace = true }
+async-trait = { workspace = true }
 futures-util = { version = "0.3", default-features = false }
 tokio-stream = { workspace = true, features = ["sync"] }
 

@@ -5,56 +5,8 @@ use crate::pool::DbPool;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use super::entity::{MessageStatus, OutboxMessage};
-
-/// Error type for outbox repository operations
-#[derive(Debug, thiserror::Error)]
-pub enum OutboxError {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Message not found: {0}")]
-    NotFound(Uuid),
-}
-
-/// Outbox repository trait
-#[async_trait]
-pub trait OutboxRepository: Send + Sync {
-    /// Create a new outbox message
-    async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
-
-    /// Create multiple outbox messages in a batch
-    async fn create_batch(&self, messages: &[OutboxMessage]) -> Result<(), OutboxError>;
-
-    /// Get a message by ID
-    async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError>;
-
-    /// Get pending messages to publish
-    async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError>;
-
-    /// Update message status
-    async fn update_status(
-        &self,
-        id: Uuid,
-        status: MessageStatus,
-        error_message: Option<String>,
-    ) -> Result<(), OutboxError>;
-
-    /// Increment retry count, set status to `retrying`, and store the error.
-    ///
-    /// Returns the new retry count.
-    async fn increment_retry(
-        &self,
-        id: Uuid,
-        error_message: Option<String>,
-    ) -> Result<i32, OutboxError>;
-
-    /// Mark message as published
-    async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError>;
-
-    /// Delete a message
-    async fn delete(&self, id: Uuid) -> Result<(), OutboxError>;
-}
+pub use rs_broker_core::features::publishing::ports::{OutboxError, OutboxRepository};
+use rs_broker_core::features::publishing::{MessageStatus, OutboxMessage};
 
 /// SQLx-based outbox repository
 #[derive(Clone)]
@@ -100,7 +52,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(message.updated_at)
         .bind(message.published_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -110,7 +63,7 @@ impl OutboxRepository for SqlxOutboxRepository {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin().await.map_err(storage)?;
 
         for message in messages {
             sqlx::query(
@@ -139,10 +92,11 @@ impl OutboxRepository for SqlxOutboxRepository {
             .bind(message.updated_at)
             .bind(message.published_at)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(storage)?;
         }
 
-        tx.commit().await?;
+        tx.commit().await.map_err(storage)?;
         Ok(())
     }
 
@@ -151,7 +105,8 @@ impl OutboxRepository for SqlxOutboxRepository {
             sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = $1")
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?;
+                .await
+                .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -162,7 +117,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         )
         .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -180,7 +135,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(&error_message)
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(())
     }
@@ -204,7 +159,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(&error_message)
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(row.0)
     }
@@ -215,7 +171,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         )
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(())
     }
@@ -224,7 +180,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         sqlx::query("DELETE FROM outbox_messages WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -259,7 +216,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(message.updated_at)
         .bind(message.published_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(())
     }
@@ -269,7 +227,7 @@ impl OutboxRepository for SqlxOutboxRepository {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin().await.map_err(storage)?;
 
         for message in messages {
             sqlx::query(
@@ -297,10 +255,11 @@ impl OutboxRepository for SqlxOutboxRepository {
             .bind(message.updated_at)
             .bind(message.published_at)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(storage)?;
         }
 
-        tx.commit().await?;
+        tx.commit().await.map_err(storage)?;
         Ok(())
     }
 
@@ -309,7 +268,8 @@ impl OutboxRepository for SqlxOutboxRepository {
             sqlx::query_as::<_, OutboxMessageRow>("SELECT * FROM outbox_messages WHERE id = ?")
                 .bind(id)
                 .fetch_one(&self.pool)
-                .await?;
+                .await
+                .map_err(storage)?;
 
         Ok(row.into())
     }
@@ -320,7 +280,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         )
         .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -338,7 +298,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(&error_message)
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(())
     }
@@ -362,7 +322,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         .bind(&error_message)
         .bind(id)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(storage)?;
 
         Ok(row.0)
     }
@@ -373,7 +334,7 @@ impl OutboxRepository for SqlxOutboxRepository {
         )
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(storage)?;
 
         Ok(())
     }
@@ -382,7 +343,8 @@ impl OutboxRepository for SqlxOutboxRepository {
         sqlx::query("DELETE FROM outbox_messages WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(storage)?;
 
         Ok(())
     }
@@ -434,4 +396,7 @@ impl From<OutboxMessageRow> for OutboxMessage {
             published_at: row.published_at,
         }
     }
+}
+fn storage(e: sqlx::Error) -> rs_broker_core::features::publishing::ports::OutboxError {
+    rs_broker_core::features::publishing::ports::OutboxError::Database(e.to_string())
 }

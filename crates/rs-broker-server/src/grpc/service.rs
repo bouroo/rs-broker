@@ -18,68 +18,48 @@ use rs_broker_proto::rsbroker::{
     UnregisterSubscriberResponse, UpdateSubscriberRequest, UpdateSubscriberResponse,
 };
 
+use rs_broker_core::features::publishing::{AcceptError, AcceptMessage, PublishRequestInput};
 use rs_broker_db::{
-    OutboxMessage, OutboxRepository, SqlxOutboxRepository, SqlxSubscriberRepository, Subscriber,
+    OutboxRepository, SqlxOutboxRepository, SqlxSubscriberRepository, Subscriber,
     SubscriberRepository,
 };
 
-/// Process a single publish request against the given outbox repository.
+/// Interface-adapter shell around the [`AcceptMessage`] use case: converts
+/// the wire request to the transport-free input, delegates validation and
+/// outbox insertion to the feature, and maps back to the wire response.
 ///
 /// This is a free function so it can be called from both the unary `publish`
 /// method and the bidirectional `stream_publish` without needing to clone the
 /// whole service.
+//
+// `tonic::Status` as the Err variant exceeds clippy's `result_large_err`
+// threshold; matching the generated proto traits' own exemption.
+#[allow(clippy::result_large_err)]
 async fn process_publish(
-    outbox_repo: &SqlxOutboxRepository,
+    use_case: &AcceptMessage,
     req: PublishRequest,
 ) -> Result<PublishResponse, Status> {
-    let message_id = if req.message_id.is_empty() {
-        Uuid::now_v7().to_string()
-    } else {
-        req.message_id
+    let input = PublishRequestInput {
+        message_id: Some(req.message_id),
+        aggregate_type: req.aggregate_type,
+        aggregate_id: req.aggregate_id,
+        event_type: req.event_type,
+        payload: req.payload,
+        headers: req.headers.into_iter().map(|h| (h.key, h.value)).collect(),
+        topic: req.topic,
+        partition_key: Some(req.partition_key).filter(|k| !k.is_empty()),
     };
 
-    let payload: serde_json::Value = if req.payload.is_empty() {
-        serde_json::json!({})
-    } else {
-        serde_json::from_slice(&req.payload)
-            .map_err(|e| Status::invalid_argument(format!("Invalid payload JSON: {}", e)))?
-    };
-
-    let headers = if req.headers.is_empty() {
-        None
-    } else {
-        let headers_map: std::collections::HashMap<String, String> = req
-            .headers
-            .iter()
-            .map(|h| (h.key.clone(), h.value.clone()))
-            .collect();
-        serde_json::to_value(headers_map).ok()
-    };
-
-    let mut message = OutboxMessage::new(
-        req.aggregate_type,
-        req.aggregate_id,
-        req.event_type,
-        payload,
-        req.topic,
-    );
-
-    message.id = Uuid::parse_str(&message_id)
-        .map_err(|e| Status::invalid_argument(format!("Invalid message_id: {}", e)))?;
-    message.headers = headers;
-    message.partition_key = if req.partition_key.is_empty() {
-        None
-    } else {
-        Some(req.partition_key)
-    };
-
-    outbox_repo
-        .create(&message)
-        .await
-        .map_err(|e| Status::internal(format!("Failed to create message: {}", e)))?;
+    let message_id = use_case.apply(input).await.map_err(|e| match e {
+        // Wire-compatible error text (validation messages preserved).
+        AcceptError::InvalidPayload(_) | AcceptError::InvalidMessageId(_) => {
+            Status::invalid_argument(e.to_string())
+        }
+        _ => Status::internal(e.to_string()),
+    })?;
 
     Ok(PublishResponse {
-        message_id,
+        message_id: message_id.to_string(),
         status: ProtoMessageStatus::Pending.into(),
         duplicate: false,
         accepted_at: Utc::now().timestamp(),
@@ -93,6 +73,7 @@ pub struct RsBrokerService {
     db_pool: rs_broker_db::DbPool,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     outbox_repo: SqlxOutboxRepository,
+    accept_message: AcceptMessage,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     subscriber_repo: SqlxSubscriberRepository,
     #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -121,12 +102,16 @@ impl RsBrokerService {
     /// Create a new RsBroker service with the Kafka health flag.
     pub fn with_kafka(db_pool: rs_broker_db::DbPool, kafka_connected: bool) -> Self {
         let outbox_repo = SqlxOutboxRepository::new(db_pool.clone());
+        let accept_message = AcceptMessage::new(std::sync::Arc::new(outbox_repo.clone()));
         let subscriber_repo = SqlxSubscriberRepository::new(db_pool.clone());
-        let dlq_handler = DlqHandler::new(db_pool.clone());
+        let dlq_handler = DlqHandler::new(std::sync::Arc::new(
+            rs_broker_db::SqlxDlqRepository::new(db_pool.clone()),
+        ));
         let (event_sender, _) = broadcast::channel(1024);
         Self {
             db_pool,
             outbox_repo,
+            accept_message,
             subscriber_repo,
             dlq_handler,
             kafka_connected,
@@ -143,8 +128,9 @@ impl RsBrokerService {
     }
 
     /// Process a single publish request, returning the response or a Status error.
+    #[allow(clippy::result_large_err)] // tonic::Status, same as generated traits
     async fn publish_single(&self, req: PublishRequest) -> Result<PublishResponse, Status> {
-        process_publish(&self.outbox_repo, req).await
+        process_publish(&self.accept_message, req).await
     }
 }
 
@@ -198,11 +184,11 @@ impl RsBroker for RsBrokerService {
         let mut failure_count = 0;
 
         for msg_req in req.messages {
-            let result = self.publish(Request::new(msg_req)).await;
+            let result = self.publish_single(msg_req).await;
             match result {
                 Ok(resp) => {
                     success_count += 1;
-                    responses.push(resp.into_inner());
+                    responses.push(resp);
                 }
                 Err(e) => {
                     failure_count += 1;
@@ -430,7 +416,10 @@ impl RsBroker for RsBrokerService {
                 async move {
                     match result {
                         Ok(event) => {
-                            if topic_matches(&event.topic, &patterns) {
+                            // Same unified MQTT-semantics matcher the gRPC
+                            // callback fan-out uses, so both inbound delivery
+                            // paths agree on what a subscriber receives.
+                            if rs_broker_core::matches_any(&event.topic, &patterns) {
                                 Some(Ok(event))
                             } else {
                                 None
@@ -460,11 +449,11 @@ impl RsBroker for RsBrokerService {
         &self,
         request: Request<tonic::Streaming<PublishRequest>>,
     ) -> Result<Response<Self::StreamPublishStream>, Status> {
-        let outbox_repo = self.outbox_repo.clone();
+        let accept_message = self.accept_message.clone();
         let incoming = request.into_inner();
 
         let output = incoming.then(move |result| {
-            let outbox_repo = outbox_repo.clone();
+            let accept_message = accept_message.clone();
             async move {
                 let req = match result {
                     Ok(r) => r,
@@ -479,7 +468,7 @@ impl RsBroker for RsBrokerService {
                     }
                 };
 
-                let response = match process_publish(&outbox_repo, req).await {
+                let response = match process_publish(&accept_message, req).await {
                     Ok(resp) => resp,
                     Err(status) => PublishResponse {
                         message_id: String::new(),
@@ -787,25 +776,38 @@ impl RsBroker for RsBrokerService {
 
 /// Check if a topic matches any of the given patterns.
 ///
-/// Supports:
-/// - `*` matches everything
-/// - `prefix.*` matches any topic starting with `prefix.`
-/// - Exact string match otherwise
-fn topic_matches(topic: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
+/// Uses the unified MQTT-semantics matcher (`rs_broker_core::matches_any`),
+/// same as the gRPC callback fan-out; see its module docs for the wildcard
+/// contract.
+#[cfg(test)]
+mod subscribe_events_filter {
+    use rs_broker_core::matches_any;
+
+    /// `*` as a full segment matches exactly one segment (MQTT), not a suffix.
+    #[test]
+    fn single_segment_star_wildcard() {
+        assert!(matches_any("user.created", &["user.*".to_string()]));
+        assert!(!matches_any(
+            "user.profile.updated",
+            &["user.*".to_string()]
+        ));
+        assert!(matches_any(
+            "user.profile",
+            &["user.#".to_string(), "user.*.profile".to_string()]
+        ));
     }
-    for pattern in patterns {
-        if pattern == "*" {
-            return true;
-        }
-        if let Some(prefix) = pattern.strip_suffix(".*") {
-            if topic.starts_with(&format!("{}.", prefix)) {
-                return true;
-            }
-        } else if topic == pattern {
-            return true;
-        }
+
+    /// Empty pattern lists match nothing, consistent with the fan-out path.
+    #[test]
+    fn empty_patterns_match_nothing() {
+        assert!(!matches_any("user.created", &[]));
     }
-    false
+
+    /// `#` matches zero or more remaining segments; `+` exactly one.
+    #[test]
+    fn plus_and_hash_wildcards() {
+        assert!(matches_any("user.created", &["user.+".to_string()]));
+        assert!(matches_any("user", &["user.#".to_string()]));
+        assert!(matches_any("a.b.c.d", &["#".to_string()]));
+    }
 }

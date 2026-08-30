@@ -2,9 +2,9 @@
 // Run with: cargo bench --package rs-broker-core
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use rs_broker_core::features::subscription::Subscriber;
 use rs_broker_core::inbox::dedup::Deduplicator;
 use rs_broker_core::topic::matches_topic;
-use rs_broker_db::Subscriber;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -205,7 +205,7 @@ fn bench_get_subscribers_pattern(c: &mut Criterion) {
             let patterns = match i % 3 {
                 0 => vec![format!("exact_topic_{}", i)],
                 1 => vec![format!("prefix_*_{}", i / 10)],
-                _ => vec![format!("another_topic"), format!("wildcard_*")],
+                _ => vec!["another_topic".to_string(), "wildcard_*".to_string()],
             };
             Subscriber::new(
                 format!("service_{}", i),
@@ -478,7 +478,7 @@ fn bench_registry_get_by_topic(c: &mut Criterion) {
             let subscriber = Subscriber::new(
                 format!("service_{}", i),
                 format!("grpc://localhost:{}", 5000 + (i % 1000)),
-                vec![format!("topic_{}", i % 100), format!("general_*")], // Some with wildcards
+                vec![format!("topic_{}", i % 100), "general_*".to_string()], // Some with wildcards
             );
             subs.add(subscriber).await;
         }

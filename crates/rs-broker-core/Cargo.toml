@@ -17,14 +17,9 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
-sqlx = { workspace = true }
 
-tonic = { workspace = true }
 
 rs-broker-config = { workspace = true }
-rs-broker-db = { workspace = true }
-rs-broker-kafka = { workspace = true }
-rs-broker-proto = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.5"
@@ -35,8 +30,8 @@ rand = "0.8"
 
 [features]
 default = ["postgres"]
-postgres = ["rs-broker-db/postgres"]
-mysql = ["rs-broker-db/mysql"]
+postgres = []
+mysql = []
 
 [[bench]]
 name = "lib"
