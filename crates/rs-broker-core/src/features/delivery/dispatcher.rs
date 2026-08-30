@@ -6,18 +6,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
-use tonic::Status;
 
-use super::channel_pool::{ChannelPool, ChannelPoolConfig};
-
+use crate::features::delivery::ports::{
+    DeliverNotification, NotificationError, NotificationOutcome, SubscriberNotifier,
+};
 use crate::features::subscription::ports::SubscriberRepository;
 use crate::features::subscription::Subscriber;
 use crate::shared::error::{Error, Result};
 use crate::shared::topic::matches_any;
-use rs_broker_proto::rsbroker::{
-    rs_broker_callback_client::RsBrokerCallbackClient, DeliverRequest, DeliverResponse,
-};
-
 /// Circuit breaker state
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CircuitBreakerState {
@@ -208,8 +204,8 @@ pub struct SubscriberDispatcher {
     endpoints: Arc<RwLock<HashMap<String, SubscriberEndpoint>>>,
     /// Timeout for individual delivery requests
     request_timeout: Duration,
-    /// Channel pool for gRPC connections
-    channel_pool: Arc<ChannelPool>,
+    /// Subscriber notification transport
+    notifier: Arc<dyn SubscriberNotifier>,
     /// Upper bound on concurrent in-flight deliveries per `dispatch_to_all`
     /// call. See [`DEFAULT_FAN_OUT_CONCURRENCY`].
     fan_out_concurrency: usize,
@@ -217,12 +213,15 @@ pub struct SubscriberDispatcher {
 
 impl SubscriberDispatcher {
     /// Create a new subscriber dispatcher
-    pub fn new(subscriber_repo: Arc<dyn SubscriberRepository>) -> Self {
+    pub fn new(
+        subscriber_repo: Arc<dyn SubscriberRepository>,
+        notifier: Arc<dyn SubscriberNotifier>,
+    ) -> Self {
         Self {
             subscriber_repo,
             endpoints: Arc::new(RwLock::new(HashMap::new())),
             request_timeout: Duration::from_secs(10),
-            channel_pool: Arc::new(ChannelPool::new(ChannelPoolConfig::default())),
+            notifier,
             fan_out_concurrency: DEFAULT_FAN_OUT_CONCURRENCY,
         }
     }
@@ -293,7 +292,7 @@ impl SubscriberDispatcher {
     pub async fn dispatch(
         &self,
         subscriber: &Subscriber,
-        request: DeliverRequest,
+        request: DeliverNotification,
     ) -> DeliveryResult {
         let subscriber_id = subscriber.id.to_string();
 
@@ -318,12 +317,17 @@ impl SubscriberDispatcher {
             endpoint.endpoint().to_string()
         };
 
-        // Deliver with timeout (lock released during I/O)
-        let result = timeout(
+        // Deliver with the per-delivery timeout (lock released during I/O);
+        // elapsed maps to NotificationError::Timeout for the outcome mapper.
+        let result = match timeout(
             self.request_timeout,
             self.deliver_to_endpoint(&endpoint_addr, request),
         )
-        .await;
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => Err(NotificationError::Timeout),
+        };
 
         // Record result in circuit breaker if the endpoint is still present.
         // Between releasing the write lock for the I/O call and re-acquiring it
@@ -333,9 +337,9 @@ impl SubscriberDispatcher {
         {
             let mut endpoints = self.endpoints.write().await;
             if let Some(endpoint) = endpoints.get_mut(&subscriber_id) {
-                match &result {
-                    Ok(Ok(_)) => endpoint.circuit_breaker.record_success(),
-                    Ok(Err(_)) | Err(_) => endpoint.circuit_breaker.record_failure(),
+                match result {
+                    Ok(_) => endpoint.circuit_breaker.record_success(),
+                    Err(_) => endpoint.circuit_breaker.record_failure(),
                 }
             } else {
                 tracing::warn!(
@@ -348,35 +352,13 @@ impl SubscriberDispatcher {
         outcome_to_delivery_result(subscriber_id, result)
     }
 
-    /// Deliver message to a specific endpoint
-    //
-    // `tonic::Status` as the Err variant exceeds clippy's `result_large_err`
-    // threshold; matching the generated proto traits' own exemption.
-    #[allow(clippy::result_large_err)]
+    /// Deliver a notification to a specific endpoint through the notifier port
     async fn deliver_to_endpoint(
         &self,
         endpoint: &str,
-        request: DeliverRequest,
-    ) -> std::result::Result<DeliverResponse, Status> {
-        // Get a channel from the pool
-        let channel = self
-            .channel_pool
-            .get_channel(endpoint)
-            .await
-            .map_err(|e| Status::unavailable(format!("Failed to get channel: {}", e)))?;
-
-        // Clone for the client; the original is returned to the pool afterwards.
-        // Channel::clone is cheap (Arc-based internal pool).
-        let mut client = RsBrokerCallbackClient::new(channel.clone());
-
-        let result = client.deliver(request).await.map(|r| r.into_inner());
-
-        // Return the channel for reuse regardless of outcome. Tonic's Channel
-        // handles reconnection internally, so even a failed call's channel can
-        // be retried on the next delivery.
-        let _ = self.channel_pool.put_channel(endpoint, channel).await;
-
-        result
+        request: DeliverNotification,
+    ) -> std::result::Result<NotificationOutcome, NotificationError> {
+        self.notifier.notify(endpoint, request).await
     }
 
     /// Dispatch to all matching subscribers
@@ -390,7 +372,7 @@ impl SubscriberDispatcher {
     pub async fn dispatch_to_all(
         &self,
         topic: &str,
-        request: DeliverRequest,
+        request: DeliverNotification,
     ) -> Vec<DeliveryResult> {
         let subscribers = self.get_matching_subscribers(topic).await;
 
@@ -420,31 +402,28 @@ impl SubscriberDispatcher {
 /// under the TOCTOU race where the endpoint vanished.
 fn outcome_to_delivery_result(
     subscriber_id: String,
-    result: std::result::Result<
-        std::result::Result<DeliverResponse, Status>,
-        tokio::time::error::Elapsed,
-    >,
+    result: std::result::Result<NotificationOutcome, NotificationError>,
 ) -> DeliveryResult {
     match result {
-        Ok(Ok(response)) => DeliveryResult {
+        Ok(outcome) => DeliveryResult {
             subscriber_id,
-            success: response.success,
-            error: if response.error.is_empty() {
+            success: outcome.success,
+            error: if outcome.error.is_empty() {
                 None
             } else {
-                Some(response.error)
+                Some(outcome.error)
             },
-            retry: response.retry,
-            retry_delay_ms: response.retry_delay_ms,
+            retry: outcome.retry,
+            retry_delay_ms: outcome.retry_delay_ms,
         },
-        Ok(Err(e)) => DeliveryResult {
+        Err(NotificationError::Transport(msg)) => DeliveryResult {
             subscriber_id,
             success: false,
-            error: Some(e.message().to_string()),
+            error: Some(msg),
             retry: true,
             retry_delay_ms: 1000,
         },
-        Err(_) => DeliveryResult {
+        Err(NotificationError::Timeout) => DeliveryResult {
             subscriber_id,
             success: false,
             error: Some("Request timeout".to_string()),
@@ -468,30 +447,32 @@ mod tests {
     /// verifying the mapping function never panics across all three branches.
     #[tokio::test]
     async fn outcome_to_delivery_result_does_not_panic_on_any_outcome() {
-        let _ = outcome_to_delivery_result("sub".into(), Ok(Ok(DeliverResponse::default())));
-        let _ = outcome_to_delivery_result("sub".into(), Ok(Err(Status::unavailable("down"))));
-
-        // Construct an Elapsed via a real (zero-duration) timeout — `Elapsed::new`
-        // is `pub(crate)` so we cannot call it directly.
-        let elapsed: tokio::time::error::Elapsed = tokio::time::timeout(
-            std::time::Duration::from_millis(0),
-            tokio::time::sleep(std::time::Duration::from_secs(1)),
-        )
-        .await
-        .unwrap_err();
-        let _ = outcome_to_delivery_result("sub".into(), Err(elapsed));
+        let _ = outcome_to_delivery_result(
+            "sub".into(),
+            Ok(NotificationOutcome {
+                success: true,
+                error: String::new(),
+                retry: false,
+                retry_delay_ms: 0,
+            }),
+        );
+        let _ = outcome_to_delivery_result(
+            "sub".into(),
+            Err(NotificationError::Transport("down".into())),
+        );
+        let _ = outcome_to_delivery_result("sub".into(), Err(NotificationError::Timeout));
     }
 
     #[test]
     fn outcome_to_delivery_result_maps_success() {
         let r = outcome_to_delivery_result(
             "sub-1".into(),
-            Ok(Ok(DeliverResponse {
+            Ok(NotificationOutcome {
                 success: true,
                 error: String::new(),
                 retry: false,
                 retry_delay_ms: 0,
-            })),
+            }),
         );
         assert_eq!(r.subscriber_id, "sub-1");
         assert!(r.success);
@@ -501,22 +482,19 @@ mod tests {
 
     #[test]
     fn outcome_to_delivery_result_maps_grpc_error() {
-        let r = outcome_to_delivery_result("sub-2".into(), Ok(Err(Status::unavailable("boom"))));
+        let r = outcome_to_delivery_result(
+            "sub-2".into(),
+            Err(NotificationError::Transport("boom".into())),
+        );
         assert!(!r.success);
         assert!(r.retry);
         assert_eq!(r.error.as_deref(), Some("boom"));
         assert_eq!(r.retry_delay_ms, 1000);
     }
 
-    #[tokio::test]
-    async fn outcome_to_delivery_result_maps_timeout() {
-        let elapsed: tokio::time::error::Elapsed = tokio::time::timeout(
-            std::time::Duration::from_millis(0),
-            tokio::time::sleep(std::time::Duration::from_secs(1)),
-        )
-        .await
-        .unwrap_err();
-        let r = outcome_to_delivery_result("sub-3".into(), Err(elapsed));
+    #[test]
+    fn outcome_to_delivery_result_maps_timeout() {
+        let r = outcome_to_delivery_result("sub-3".into(), Err(NotificationError::Timeout));
         assert!(!r.success);
         assert!(r.retry);
         assert_eq!(r.error.as_deref(), Some("Request timeout"));
@@ -529,9 +507,9 @@ mod tests {
     /// converted from a sequential loop to a concurrent stream.
     #[tokio::test]
     async fn dispatch_to_all_empty_subscriber_set_returns_empty_vec() {
-        let sd = SubscriberDispatcher::new(test_subscriber_repository());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
         let results = sd
-            .dispatch_to_all("no-such-topic", DeliverRequest::default())
+            .dispatch_to_all("no-such-topic", DeliverNotification::default())
             .await;
         assert!(
             results.is_empty(),
@@ -544,7 +522,7 @@ mod tests {
     /// to inspect (and tests can pin regressions on) the bound.
     #[tokio::test]
     async fn default_fan_out_concurrency_matches_documented_constant() {
-        let sd = SubscriberDispatcher::new(test_subscriber_repository());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
         assert_eq!(sd.fan_out_concurrency(), DEFAULT_FAN_OUT_CONCURRENCY);
         assert!(sd.fan_out_concurrency() >= 1);
     }
@@ -560,7 +538,7 @@ mod tests {
     async fn dispatch_to_all_returns_one_fast_fail_result_per_subscriber() {
         use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
-        let sd = SubscriberDispatcher::new(test_subscriber_repository());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
 
         // Three subscribers all matching topic "orders.created".
         let subs = vec![
@@ -600,7 +578,7 @@ mod tests {
         }
 
         let results = sd
-            .dispatch_to_all("orders.created", DeliverRequest::default())
+            .dispatch_to_all("orders.created", DeliverNotification::default())
             .await;
 
         assert_eq!(
@@ -632,7 +610,7 @@ mod tests {
     async fn merge_subscribers_preserves_circuit_breaker_state() {
         use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
-        let sd = SubscriberDispatcher::new(test_subscriber_repository());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
         let s = Subscriber::new("svc-a".into(), "http://a:1".into(), vec!["orders.*".into()]);
         let id = s.id.to_string();
 
@@ -669,7 +647,7 @@ mod tests {
     /// insert brand-new ones, so the cache converges to the database snapshot.
     #[tokio::test]
     async fn merge_subscribers_removes_gone_and_adds_new() {
-        let sd = SubscriberDispatcher::new(test_subscriber_repository());
+        let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
 
         let stale = Subscriber::new("svc-old".into(), "http://old:1".into(), vec!["*".into()]);
         {
@@ -693,6 +671,27 @@ mod tests {
             endpoints.contains_key(&fresh.id.to_string()),
             "new subscriber must be inserted"
         );
+    }
+
+    /// Transport stub for tests that never exercise the notifier; only the
+    /// circuit-breaker fast-fail branch and the mapper run here. Panics on an
+    /// actual call: a notify through this stub would mean the fan-out bypassed
+    /// the endpoint cache, which these tests do not cover.
+    fn test_notifier() -> std::sync::Arc<dyn SubscriberNotifier> {
+        struct NeverNotified;
+
+        #[async_trait::async_trait]
+        impl SubscriberNotifier for NeverNotified {
+            async fn notify(
+                &self,
+                _endpoint: &str,
+                _notification: DeliverNotification,
+            ) -> std::result::Result<NotificationOutcome, NotificationError> {
+                unreachable!("fast-fail tests must not reach the notifier")
+            }
+        }
+
+        std::sync::Arc::new(NeverNotified)
     }
 
     /// In-memory subscriber-repository stub for tests that never hit the

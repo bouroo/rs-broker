@@ -6,11 +6,11 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::features::delivery::dispatcher::SubscriberDispatcher;
+use crate::features::delivery::ports::DeliverNotification;
 use crate::features::subscription::ports::SubscriberRepository;
 use crate::features::subscription::Subscriber;
 use crate::shared::error::Result;
 use crate::shared::topic::matches_topic;
-use rs_broker_proto::rsbroker::DeliverRequest;
 
 /// Default capacity for the pattern cache.
 const DEFAULT_PATTERN_CACHE_CAPACITY: usize = 1000;
@@ -151,7 +151,7 @@ impl Dispatcher {
     pub async fn dispatch(&self, topic: &str, payload: &[u8]) -> Result<usize> {
         // If a SubscriberDispatcher is configured, use it for real gRPC delivery
         if let Some(ref sd) = self.subscriber_dispatcher {
-            let request = DeliverRequest {
+            let request = DeliverNotification {
                 message_id: uuid::Uuid::now_v7().to_string(),
                 topic: topic.to_string(),
                 payload: payload.to_vec(),

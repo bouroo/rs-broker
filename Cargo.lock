@@ -2517,12 +2517,10 @@ dependencies = [
  "parking_lot",
  "rand",
  "rs-broker-config",
- "rs-broker-proto",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tonic",
  "tracing",
  "uuid",
 ]
@@ -2582,6 +2580,7 @@ name = "rs-broker-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "chrono",
  "criterion",

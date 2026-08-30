@@ -46,11 +46,11 @@ pub mod dlq {
 
 /// Compat shim for the pre-restructure `rs_broker_core::grpc_client` paths.
 pub mod grpc_client {
+    pub use crate::features::delivery::dispatcher;
     pub use crate::features::delivery::dispatcher::{
         CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState, DeliveryResult,
         SubscriberDispatcher, SubscriberEndpoint,
     };
-    pub use crate::features::delivery::{channel_pool, dispatcher};
 }
 
 pub use crate::features::{

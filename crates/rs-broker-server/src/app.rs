@@ -272,7 +272,11 @@ impl App {
                 Arc::new(SqlxSubscriberRepository::new(db_pool.clone()));
             let inbox_mgr = InboxManager::new(Arc::new(SqlxInboxRepository::new(db_pool.clone())));
             let dispatcher = {
-                let sd = Arc::new(SubscriberDispatcher::new(Arc::clone(&subscriber_repo)));
+                let notifier = Arc::new(crate::adapters::callback::GrpcSubscriberNotifier::new());
+                let sd = Arc::new(SubscriberDispatcher::new(
+                    Arc::clone(&subscriber_repo),
+                    notifier,
+                ));
                 // Seed the endpoint cache before any dispatch can occur;
                 // without this the fan-out path matches an empty map and
                 // delivers to nobody until the first periodic refresh.
