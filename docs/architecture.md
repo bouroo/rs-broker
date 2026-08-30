@@ -12,6 +12,24 @@
 - **Scalability**: Async non-blocking operations throughout
 - **Flexibility**: Database-agnostic with pluggable backends
 
+### Layering (feature-based clean architecture)
+
+The workspace follows the four-layer clean-architecture circle diagram with
+dependencies pointing strictly inward:
+
+| Layer | Where | Contents |
+|---|---|---|
+| Entities (domain) | `rs-broker-core::shared`, `rs-broker-core::features/*/domain` | Entities with behaviour (`OutboxMessage::evaluate_publish_failure`, `Subscriber::matches_topic`), value objects, the topic matcher |
+| Use cases (application) | `rs-broker-core::features/*/use_cases|accept|handler|dispatcher` | `AcceptMessage`, `OutboxPublisher`, `InboxManager`, `SubscriberRegistry`, `SubscriberDispatcher`, `DlqHandler` |
+| Interface adapters | `rs-broker-db` (sqlx repos), `rs-broker-kafka` (`KafkaMessageSink`), `rs-broker-server::{adapters,grpc,metrics}` | proto<->DTO conversion, persistence, transport |
+| Frameworks & drivers | sqlx, rdkafka, tonic/axum, `rs-broker-config` | external machinery |
+
+Dependency rule (compiler-enforced): `rs-broker-core` has **no** dependency on
+`rs-broker-db`, `rs-broker-kafka`, `rs-broker-proto`, `tonic` or `sqlx` —
+features declare ports (repository traits, `MessageSink`, `SubscriberNotifier`)
+and the outward crates implement them. Composition (adapter construction and
+injection) happens only in `rs-broker-server`.
+
 ## High-Level Architecture
 
 ```mermaid
