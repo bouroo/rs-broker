@@ -68,7 +68,7 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, offset, key, event_type,
+                id, topic, partition, "offset", key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -110,7 +110,7 @@ impl InboxRepository for SqlxInboxRepository {
         offset: i64,
     ) -> Result<Option<InboxMessage>, InboxError> {
         let row = sqlx::query_as::<_, InboxMessageRow>(
-            "SELECT * FROM inbox_messages WHERE topic = $1 AND offset = $2",
+            "SELECT * FROM inbox_messages WHERE topic = $1 AND \"offset\" = $2",
         )
         .bind(topic)
         .bind(offset)
@@ -166,7 +166,7 @@ impl InboxRepository for SqlxInboxRepository {
         sqlx::query(
             r#"
             INSERT INTO inbox_messages (
-                id, topic, partition, offset, key, event_type,
+                id, topic, partition, `offset`, key, event_type,
                 payload, headers, timestamp, status,
                 attempt_count, error_message, received_at, processed_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -207,7 +207,7 @@ impl InboxRepository for SqlxInboxRepository {
         offset: i64,
     ) -> Result<Option<InboxMessage>, InboxError> {
         let row = sqlx::query_as::<_, InboxMessageRow>(
-            "SELECT * FROM inbox_messages WHERE topic = ? AND offset = ?",
+            "SELECT * FROM inbox_messages WHERE topic = ? AND `offset` = ?",
         )
         .bind(topic)
         .bind(offset)
