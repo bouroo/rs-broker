@@ -99,7 +99,7 @@ fn bench_retry_history(c: &mut Criterion) {
             },
             |mut histories| {
                 // Simulate updating retry counts
-                for (_key, count) in histories.iter_mut() {
+                for count in histories.values_mut() {
                     if *count < 5 {
                         // max retries
                         *count += 1;

@@ -104,6 +104,10 @@ impl ChannelPool {
     }
 
     /// Return a channel to the pool for reuse
+    ///
+    // The `()` error variant is the historical public signature; the call
+    // cannot fail today, but changing the type would break the public API.
+    #[allow(clippy::result_unit_err)]
     pub async fn put_channel(&self, endpoint: &str, channel: Channel) -> Result<(), ()> {
         let normalized_endpoint = self.normalize_endpoint(endpoint);
 

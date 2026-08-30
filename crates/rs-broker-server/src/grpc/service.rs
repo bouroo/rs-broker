@@ -28,6 +28,10 @@ use rs_broker_db::{
 /// This is a free function so it can be called from both the unary `publish`
 /// method and the bidirectional `stream_publish` without needing to clone the
 /// whole service.
+//
+// `tonic::Status` as the Err variant exceeds clippy's `result_large_err`
+// threshold; matching the generated proto traits' own exemption.
+#[allow(clippy::result_large_err)]
 async fn process_publish(
     outbox_repo: &SqlxOutboxRepository,
     req: PublishRequest,
@@ -143,6 +147,7 @@ impl RsBrokerService {
     }
 
     /// Process a single publish request, returning the response or a Status error.
+    #[allow(clippy::result_large_err)] // tonic::Status, same as generated traits
     async fn publish_single(&self, req: PublishRequest) -> Result<PublishResponse, Status> {
         process_publish(&self.outbox_repo, req).await
     }

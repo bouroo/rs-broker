@@ -324,6 +324,10 @@ impl SubscriberDispatcher {
     }
 
     /// Deliver message to a specific endpoint
+    //
+    // `tonic::Status` as the Err variant exceeds clippy's `result_large_err`
+    // threshold; matching the generated proto traits' own exemption.
+    #[allow(clippy::result_large_err)]
     async fn deliver_to_endpoint(
         &self,
         endpoint: &str,
