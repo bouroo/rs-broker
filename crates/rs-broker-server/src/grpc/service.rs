@@ -203,11 +203,11 @@ impl RsBroker for RsBrokerService {
         let mut failure_count = 0;
 
         for msg_req in req.messages {
-            let result = self.publish(Request::new(msg_req)).await;
+            let result = self.publish_single(msg_req).await;
             match result {
                 Ok(resp) => {
                     success_count += 1;
-                    responses.push(resp.into_inner());
+                    responses.push(resp);
                 }
                 Err(e) => {
                     failure_count += 1;

@@ -201,8 +201,8 @@ const DEFAULT_FAN_OUT_CONCURRENCY: usize = 32;
 
 /// Subscriber dispatcher for delivering messages to subscribers
 pub struct SubscriberDispatcher {
-    /// Database pool
-    db_pool: DbPool,
+    /// Subscriber repository, built once at construction time
+    subscriber_repo: SqlxSubscriberRepository,
     /// Subscriber endpoints cache
     endpoints: Arc<RwLock<HashMap<String, SubscriberEndpoint>>>,
     /// Timeout for individual delivery requests
@@ -218,7 +218,7 @@ impl SubscriberDispatcher {
     /// Create a new subscriber dispatcher
     pub fn new(db_pool: DbPool) -> Self {
         Self {
-            db_pool,
+            subscriber_repo: SqlxSubscriberRepository::new(db_pool),
             endpoints: Arc::new(RwLock::new(HashMap::new())),
             request_timeout: Duration::from_secs(10),
             channel_pool: Arc::new(ChannelPool::new(ChannelPoolConfig::default())),
@@ -234,8 +234,10 @@ impl SubscriberDispatcher {
 
     /// Load subscribers from database
     pub async fn load_subscribers(&self) -> Result<Vec<Subscriber>> {
-        let repo = SqlxSubscriberRepository::new(self.db_pool.clone());
-        repo.get_all_active().await.map_err(Error::from)
+        self.subscriber_repo
+            .get_all_active()
+            .await
+            .map_err(Error::from)
     }
 
     /// Refresh subscriber cache from database
