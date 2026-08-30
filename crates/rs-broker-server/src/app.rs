@@ -257,6 +257,16 @@ impl App {
             let inbox_mgr = InboxManager::new(db_pool.clone());
             let dispatcher = {
                 let sd = Arc::new(SubscriberDispatcher::new(db_pool.clone()));
+                // Seed the endpoint cache before any dispatch can occur;
+                // without this the fan-out path matches an empty map and
+                // delivers to nobody until the first periodic refresh.
+                if let Err(e) = sd.refresh_subscribers().await {
+                    tracing::warn!(
+                        "Initial subscriber refresh failed: {}. Fan-out stays disabled until it succeeds.",
+                        e
+                    );
+                }
+                spawn_subscriber_refresh(sd.clone());
                 Dispatcher::with_subscriber_dispatcher(db_pool, sd)
             };
             spawn_consumer_loop(consumer, inbox_mgr, dispatcher, event_sender);
@@ -286,6 +296,33 @@ impl App {
 
 /// Spawn the consumer loop that reads from Kafka and stores messages in the inbox,
 /// dispatches to subscribers, and broadcasts events for streaming subscribers.
+/// How often the gRPC fan-out dispatcher refreshes its subscriber cache from
+/// the database. Without periodic refresh the endpoint cache would stay empty
+/// (or stale) forever: `SubscriberDispatcher` never populates it on its own.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+const SUBSCRIBER_REFRESH_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+
+/// Spawn a background task that periodically merges active subscribers into
+/// the dispatcher's endpoint cache. Errors are logged, never fatal: a failed
+/// refresh keeps the previous snapshot.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+fn spawn_subscriber_refresh(sd: std::sync::Arc<SubscriberDispatcher>) {
+    tokio::spawn(async move {
+        // The immediate first tick of a fresh interval is consumed: the
+        // startup refresh (in `run`) already seeded the cache.
+        let mut interval = tokio::time::interval(SUBSCRIBER_REFRESH_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            if let Err(e) = sd.refresh_subscribers().await {
+                tracing::warn!("Subscriber refresh failed, keeping last snapshot: {}", e);
+            }
+        }
+    });
+}
+
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 fn spawn_consumer_loop(
     consumer: KafkaConsumer,

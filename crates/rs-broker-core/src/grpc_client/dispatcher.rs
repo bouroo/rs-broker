@@ -241,19 +241,40 @@ impl SubscriberDispatcher {
     }
 
     /// Refresh subscriber cache from database
+    ///
+    /// Merges the database state into the in-memory endpoint map instead of
+    /// clearing it: circuit-breaker state survives refreshes, and removed
+    /// subscribers drop out. A clear-and-rebuild would reset every breaker
+    /// and race in-flight deliveries that record results after the wipe.
     pub async fn refresh_subscribers(&self) -> Result<()> {
         let subscribers = self.load_subscribers().await?;
+        self.merge_subscribers(subscribers).await;
+        Ok(())
+    }
+
+    /// Merge a full active-subscriber snapshot into the endpoint map,
+    /// preserving existing circuit breakers for known subscriber IDs.
+    async fn merge_subscribers(&self, subscribers: Vec<Subscriber>) {
+        let active_ids: std::collections::HashSet<String> =
+            subscribers.iter().map(|s| s.id.to_string()).collect();
+
         let mut endpoints = self.endpoints.write().await;
 
-        endpoints.clear();
-        for subscriber in subscribers {
-            endpoints.insert(
-                subscriber.id.to_string(),
-                SubscriberEndpoint::new(subscriber),
-            );
-        }
+        // Deactivated/removed subscribers leave the cache; everyone else keeps
+        // their breaker history.
+        endpoints.retain(|id, _| active_ids.contains(id));
 
-        Ok(())
+        for subscriber in subscribers {
+            match endpoints.get_mut(&subscriber.id.to_string()) {
+                Some(endpoint) => endpoint.subscriber = subscriber,
+                None => {
+                    endpoints.insert(
+                        subscriber.id.to_string(),
+                        SubscriberEndpoint::new(subscriber),
+                    );
+                }
+            }
+        }
     }
 
     /// Get subscribers matching a topic
@@ -305,8 +326,9 @@ impl SubscriberDispatcher {
 
         // Record result in circuit breaker if the endpoint is still present.
         // Between releasing the write lock for the I/O call and re-acquiring it
-        // here, `refresh_subscribers` may have cleared the endpoint map; we must
-        // handle that gracefully instead of panicking.
+        // here, `refresh_subscribers` may have removed this endpoint (e.g. the
+        // subscriber was deactivated); we must handle that gracefully instead
+        // of panicking.
         {
             let mut endpoints = self.endpoints.write().await;
             if let Some(endpoint) = endpoints.get_mut(&subscriber_id) {
@@ -599,6 +621,77 @@ mod tests {
             assert_eq!(r.error.as_deref(), Some("Circuit breaker open"));
             assert_eq!(r.retry_delay_ms, 1000);
         }
+    }
+
+    /// Merge-refresh must preserve circuit-breaker state for subscribers that
+    /// stay registered: only the subscriber payload is updated. Under the old
+    /// clear-and-rebuild, every breaker reset on each refresh and failures
+    /// accumulated by a live subscriber were silently forgotten.
+    #[tokio::test]
+    async fn merge_subscribers_preserves_circuit_breaker_state() {
+        use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
+
+        let sd = SubscriberDispatcher::new(test_db_pool());
+        let s = Subscriber::new("svc-a".into(), "http://a:1".into(), vec!["orders.*".into()]);
+        let id = s.id.to_string();
+
+        {
+            let mut endpoints = sd.endpoints.write().await;
+            let mut ep = SubscriberEndpoint::new(s.clone());
+            let mut cb = CircuitBreaker::new(CircuitBreakerConfig {
+                failure_threshold: 1,
+                ..CircuitBreakerConfig::default()
+            });
+            cb.record_failure(); // open circuit — history that must survive
+            ep.circuit_breaker = cb;
+            endpoints.insert(id.clone(), ep);
+        }
+
+        // Same subscriber id, updated endpoint address.
+        let mut updated =
+            Subscriber::new("svc-a".into(), "http://a:2".into(), vec!["orders.*".into()]);
+        updated.id = s.id;
+
+        sd.merge_subscribers(vec![updated]).await;
+
+        let endpoints = sd.endpoints.read().await;
+        let ep = endpoints.get(&id).expect("known subscriber must remain");
+        assert_eq!(ep.endpoint(), "http://a:2", "subscriber data is refreshed");
+        assert_eq!(
+            ep.circuit_breaker.state(),
+            CircuitBreakerState::Open,
+            "breaker history must survive the merge"
+        );
+    }
+
+    /// Merge-refresh must drop endpoints for subscribers no longer active and
+    /// insert brand-new ones, so the cache converges to the database snapshot.
+    #[tokio::test]
+    async fn merge_subscribers_removes_gone_and_adds_new() {
+        let sd = SubscriberDispatcher::new(test_db_pool());
+
+        let stale = Subscriber::new("svc-old".into(), "http://old:1".into(), vec!["*".into()]);
+        {
+            let mut endpoints = sd.endpoints.write().await;
+            endpoints.insert(stale.id.to_string(), SubscriberEndpoint::new(stale.clone()));
+        }
+
+        let fresh = Subscriber::new(
+            "svc-new".into(),
+            "http://new:1".into(),
+            vec!["bills.#".into()],
+        );
+        sd.merge_subscribers(vec![fresh.clone()]).await;
+
+        let endpoints = sd.endpoints.read().await;
+        assert!(
+            !endpoints.contains_key(&stale.id.to_string()),
+            "deactivated subscriber must be removed"
+        );
+        assert!(
+            endpoints.contains_key(&fresh.id.to_string()),
+            "new subscriber must be inserted"
+        );
     }
 
     /// Synthetic DB pool that satisfies the `DbPool` shape used by
