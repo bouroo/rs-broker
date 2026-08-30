@@ -435,7 +435,10 @@ impl RsBroker for RsBrokerService {
                 async move {
                     match result {
                         Ok(event) => {
-                            if topic_matches(&event.topic, &patterns) {
+                            // Same unified MQTT-semantics matcher the gRPC
+                            // callback fan-out uses, so both inbound delivery
+                            // paths agree on what a subscriber receives.
+                            if rs_broker_core::matches_any(&event.topic, &patterns) {
                                 Some(Ok(event))
                             } else {
                                 None
@@ -792,25 +795,38 @@ impl RsBroker for RsBrokerService {
 
 /// Check if a topic matches any of the given patterns.
 ///
-/// Supports:
-/// - `*` matches everything
-/// - `prefix.*` matches any topic starting with `prefix.`
-/// - Exact string match otherwise
-fn topic_matches(topic: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
+/// Uses the unified MQTT-semantics matcher (`rs_broker_core::matches_any`),
+/// same as the gRPC callback fan-out; see its module docs for the wildcard
+/// contract.
+#[cfg(test)]
+mod subscribe_events_filter {
+    use rs_broker_core::matches_any;
+
+    /// `*` as a full segment matches exactly one segment (MQTT), not a suffix.
+    #[test]
+    fn single_segment_star_wildcard() {
+        assert!(matches_any("user.created", &["user.*".to_string()]));
+        assert!(!matches_any(
+            "user.profile.updated",
+            &["user.*".to_string()]
+        ));
+        assert!(matches_any(
+            "user.profile",
+            &["user.#".to_string(), "user.*.profile".to_string()]
+        ));
     }
-    for pattern in patterns {
-        if pattern == "*" {
-            return true;
-        }
-        if let Some(prefix) = pattern.strip_suffix(".*") {
-            if topic.starts_with(&format!("{}.", prefix)) {
-                return true;
-            }
-        } else if topic == pattern {
-            return true;
-        }
+
+    /// Empty pattern lists match nothing, consistent with the fan-out path.
+    #[test]
+    fn empty_patterns_match_nothing() {
+        assert!(!matches_any("user.created", &[]));
     }
-    false
+
+    /// `#` matches zero or more remaining segments; `+` exactly one.
+    #[test]
+    fn plus_and_hash_wildcards() {
+        assert!(matches_any("user.created", &["user.+".to_string()]));
+        assert!(matches_any("user", &["user.#".to_string()]));
+        assert!(matches_any("a.b.c.d", &["#".to_string()]));
+    }
 }
