@@ -13,6 +13,7 @@ A Rust-based microservice implementing the inbox/outbox pattern to decouple Kafk
 
 - 📦 **Inbox/Outbox Pattern** — Reliable message delivery using database-backed outbox and inbox tables
 - 🔌 **gRPC Interface** — Type-safe API for both publishing and subscribing to Kafka topics
+- 🌐 **HTTP REST + SSE API** — Full JSON parity with the gRPC surface under `/api/v1`, including an SSE event stream
 - 🔄 **Automatic Retry Logic** — Exponential backoff with configurable retry policies and jitter
 - ☠️ **Dead Letter Queue (DLQ)** — Automatic routing of failed messages for later analysis
 - 🔒 **Circuit Breaker** — Protection against downstream service failures
@@ -66,13 +67,13 @@ cd rs-broker
 cp .env.example .env
 
 # Core services (PostgreSQL, Kafka, rs-broker)
-docker-compose up -d
+docker compose up -d
 
 # With Kafka UI (optional)
-docker-compose --profile ui up -d
+docker compose --profile ui up -d
 
 # Full stack with monitoring (optional)
-docker-compose --profile full up -d
+docker compose --profile full up -d
 ```
 
 Verify services:
@@ -86,7 +87,7 @@ curl http://localhost:9090/metrics  # Metrics endpoint
 
 ```bash
 # Start infrastructure only
-docker-compose up -d postgres kafka
+docker compose up -d postgres kafka
 
 # Build and run rs-broker locally
 cargo build --release && cargo run --release
@@ -139,6 +140,25 @@ grpcurl -plaintext -d '{
   "topic_patterns": ["orders.*"],
   "position": "LATEST"
 }' localhost:50051 rsbroker.RsBroker/SubscribeEvents
+```
+
+### HTTP REST + SSE (parity with gRPC)
+
+The same operations are available as JSON under `/api/v1` on the HTTP port —
+see [docs/http-api.md](docs/http-api.md):
+
+```bash
+# Publish
+curl -s localhost:8080/api/v1/publish -H 'content-type: application/json' -d '{
+  "aggregate_type": "Order",
+  "aggregate_id": "order-123",
+  "event_type": "OrderCreated",
+  "payload": {"amount": 100, "currency": "USD"},
+  "topic": "orders"
+}'
+
+# Stream events (SSE, pattern-filtered)
+curl -N "localhost:8080/api/v1/events/stream?subscriber_id=demo&patterns=orders.*"
 ```
 
 ## ⚙️ Configuration
@@ -326,11 +346,11 @@ docker run -d --name rs-broker \
 | `full` | All services | Complete stack |
 
 ```bash
-docker-compose up -d                              # Core only
-docker-compose --profile ui up -d                 # With Kafka UI
-docker-compose --profile producer --profile consumer up -d  # Split deployment
-docker-compose --profile full up -d               # Full stack
-docker-compose down -v                            # Cleanup
+docker compose up -d                              # Core only
+docker compose --profile ui up -d                 # With Kafka UI
+docker compose --profile producer --profile consumer up -d  # Split deployment
+docker compose --profile full up -d               # Full stack
+docker compose down -v                            # Cleanup
 ```
 
 ### Demo Script

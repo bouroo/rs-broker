@@ -27,6 +27,8 @@ mode = "both"
 # HTTP server settings
 host = "0.0.0.0"
 http_port = 8080
+# The HTTP port serves /health, the metrics path, and the
+# REST + SSE API under /api/v1 (see docs/http-api.md).
 
 # gRPC server settings
 grpc_port = 50051

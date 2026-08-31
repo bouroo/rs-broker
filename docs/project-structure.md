@@ -116,6 +116,12 @@ crates/rs-broker-server/
     ├── grpc/
     │   ├── mod.rs
     │   └── service.rs       # gRPC interface adapter (delegates to core use cases)
+    ├── http/
+    │   ├── mod.rs           # /api/v1 router over the shared RsBrokerService
+    │   ├── routes.rs        # REST handlers (same *_inner methods as gRPC)
+    │   ├── dto.rs           # serde DTOs + proto conversions
+    │   ├── error.rs         # tonic::Status -> HTTP error mapping
+    │   └── sse.rs           # SSE event stream (SubscribeEvents parity)
     └── metrics.rs           # Prometheus metrics registry
 ```
 
@@ -465,6 +471,7 @@ rs-broker/
 │   ├── architecture.md
 │   ├── data-model.md
 │   ├── grpc-proto.md
+│   ├── http-api.md
 │   ├── project-structure.md
 │   └── configuration.md
 │

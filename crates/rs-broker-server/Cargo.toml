@@ -28,6 +28,7 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 prometheus = "0.13"
+base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tonic = { workspace = true }
@@ -47,7 +48,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 tokio = { version = "1.35", features = ["rt", "macros"] }
 testcontainers = "0.23"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 serial_test = "3"
 tokio-stream = { version = "0.1", features = ["net"] }
 
