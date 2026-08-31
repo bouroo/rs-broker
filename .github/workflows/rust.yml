@@ -1,0 +1,109 @@
+# Continuous Integration for rs-broker.
+#
+# Mirrors scripts/verify.sh: fmt + clippy + check on every push/PR, then the
+# full test suite against live PostgreSQL + Kafka service containers (the
+# harness connects to them via TEST_DATABASE_URL / TEST_KAFKA_BOOTSTRAP_SERVERS
+# instead of spawning its own testcontainers).
+
+name: Rust CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy + check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: lint
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Fast verify (fmt-check, clippy -D warnings, check)
+        run: ./scripts/verify.sh fast
+
+  test:
+    name: Test (postgres + kafka)
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: rsbroker
+          POSTGRES_PASSWORD: rsbroker_dev_password
+          POSTGRES_DB: rsbroker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rsbroker -d rsbroker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      kafka:
+        image: confluentinc/cp-kafka:8.0.4
+        env:
+          # KRaft single-node configuration, mirroring compose.test.yml.
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_NODE_ID: "1"
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+          KAFKA_LOG_RETENTION_HOURS: "1"
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          KAFKA_NUM_PARTITIONS: "1"
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+        ports:
+          - 9092:9092
+    env:
+      TEST_DATABASE_URL: postgres://rsbroker:rsbroker_dev_password@localhost:5432/rsbroker
+      TEST_KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+      RUST_LOG: warn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: test
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Wait for Kafka to accept connections
+        run: |
+          for i in $(seq 1 45); do
+            if (exec 3<>/dev/tcp/localhost/9092) 2>/dev/null; then
+              echo "Kafka is up"; exit 0
+            fi
+            echo "waiting for kafka ($i/45)"; sleep 2
+          done
+          echo "kafka did not become ready" >&2; exit 1
+      - name: Run workspace tests
+        run: cargo test --workspace --features postgres
+      - name: Check no-default-features (stub) compiles
+        run: cargo check --workspace --no-default-features
+      # NOTE: a `--features mysql` compile gate is intentionally absent —
+      # rs-broker-db does not currently build under mysql-only (pre-existing
+      # E0308 in the subscriber repository); restore the gate when fixed.
