@@ -274,13 +274,56 @@ pub enum ConfigError {
 }
 
 impl Settings {
-    /// Load settings from a configuration file
+    /// Load settings from a configuration directory.
+    ///
+    /// Sources layer in order (later wins), matching the documented
+    /// configuration contract:
+    ///
+    /// 1. `{path}/default.toml` — required base configuration
+    /// 2. `{path}/{RS_BROKER_ENV}.toml` — optional environment overlay
+    ///    (`RS_BROKER_ENV`, default `development`)
+    /// 3. `RS_BROKER_`-prefixed environment variables using `__` as the path
+    ///    separator, e.g. `RS_BROKER_SERVER__HTTP_PORT=8080` or
+    ///    `RS_BROKER_KAFKA__CONSUMER__TOPICS=events,orders`
     pub fn load_from_file(path: &str) -> Result<Self, ConfigError> {
+        let environment =
+            std::env::var("RS_BROKER_ENV").unwrap_or_else(|_| "development".to_string());
+
         let config = config::Config::builder()
-            .add_source(config::File::with_name(path))
-            .add_source(config::Environment::with_prefix("RS_BROKER"))
+            .add_source(config::File::with_name(&format!("{path}/default")))
+            .add_source(config::File::with_name(&format!("{path}/{environment}")).required(false))
+            // prefix_separator must stay `_`: with_prefix leaves it unset and
+            // config-rs then reuses `separator` for the prefix too, so with
+            // separator("__") every RS_BROKER_* key would be silently skipped.
+            .add_source(
+                config::Environment::with_prefix("RS_BROKER")
+                    .prefix_separator("_")
+                    .separator("__"),
+            )
             .build()?;
 
         Ok(config.try_deserialize()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The documented layering contract: base file from the config dir,
+    /// then nested `__` environment overrides. These were both broken
+    /// before (the loader looked for a literal `config.toml` and the env
+    /// source had no separator, so overrides were silently ignored).
+    #[test]
+    fn env_overrides_nest_with_double_underscore() {
+        let config_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config");
+        std::env::set_var("RS_BROKER_SERVER__HTTP_PORT", "19999");
+        std::env::set_var("RS_BROKER_KAFKA__CONSUMER__GROUP_ID", "env-group");
+        std::env::set_var("RS_BROKER_KAFKA__CONSUMER__TOPICS", "events,orders");
+
+        let settings = Settings::load_from_file(config_dir).unwrap();
+        assert_eq!(settings.server.http_port, 19999);
+        assert_eq!(settings.kafka.consumer.group_id, "env-group");
+        assert_eq!(settings.kafka.consumer.topics, vec!["events", "orders"]);
     }
 }
