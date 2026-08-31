@@ -4,6 +4,10 @@
 //! applies migrations, and starts the gRPC + HTTP servers on ephemeral
 //! ports. The harness keeps the containers alive for the lifetime of
 //! the harness and aborts the server tasks on drop.
+//!
+//! Each test binary consumes a different subset of the harness, so unused
+//! items are expected here.
+#![allow(dead_code)]
 
 use std::net::SocketAddr;
 
@@ -13,10 +17,11 @@ use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
 };
 
-use rs_broker_config::{DatabaseConfig, KafkaConfig};
+use rs_broker_config::DatabaseConfig;
 use rs_broker_db::{create_pool, run_migrations, DbPool, SqlxOutboxRepository};
 use rs_broker_proto::rsbroker::rs_broker_client::RsBrokerClient;
 use rs_broker_proto::rsbroker::rs_broker_server::RsBrokerServer;
+use rs_broker_proto::rsbroker::DeliverEvent;
 use rs_broker_server::grpc::service::RsBrokerService;
 
 /// Bundles the running containers so they stay alive for the test's duration.
@@ -35,6 +40,11 @@ pub struct TestHarness {
     pub db_pool: DbPool,
     pub grpc_addr: String,
     pub http_addr: String,
+    /// Resolved PostgreSQL connection string (testcontainers or external).
+    pub database_url: String,
+    /// Resolved Kafka bootstrap servers (testcontainers or external).
+    pub kafka_bootstrap: String,
+    event_sender: tokio::sync::broadcast::Sender<DeliverEvent>,
     _containers: Containers,
     _grpc_task: tokio::task::JoinHandle<()>,
     _http_task: tokio::task::JoinHandle<()>,
@@ -158,30 +168,31 @@ impl TestHarness {
             None
         };
 
-        let _kafka_config = KafkaConfig {
-            bootstrap_servers: match &external_kafka {
-                Some(servers) => servers.clone(),
-                None => {
-                    let k = kafka.as_ref().expect(
-                        "kafka container must exist when TEST_KAFKA_BOOTSTRAP_SERVERS is unset",
-                    );
-                    let kafka_port = k
-                        .get_host_port_ipv4(9092)
-                        .await
-                        .expect("failed to get kafka port");
-                    let kafka_host = k
-                        .get_host()
-                        .await
-                        .expect("failed to get kafka host")
-                        .to_string();
-                    format!("{}:{}", kafka_host, kafka_port)
-                }
-            },
-            ..Default::default()
+        let kafka_bootstrap = match &external_kafka {
+            Some(servers) => servers.clone(),
+            None => {
+                let k = kafka.as_ref().expect(
+                    "kafka container must exist when TEST_KAFKA_BOOTSTRAP_SERVERS is unset",
+                );
+                let kafka_port = k
+                    .get_host_port_ipv4(9092)
+                    .await
+                    .expect("failed to get kafka port");
+                let kafka_host = k
+                    .get_host()
+                    .await
+                    .expect("failed to get kafka host")
+                    .to_string();
+                format!("{}:{}", kafka_host, kafka_port)
+            }
         };
 
-        // ----- gRPC server ----------------------------------------------------
+        // ----- gRPC + HTTP servers -------------------------------------------
+        // One shared service backs both transports, mirroring the composition
+        // in `rs_broker_server::app`.
         let grpc_service = RsBrokerService::with_kafka(db_pool.clone(), false);
+        let event_sender = grpc_service.event_sender();
+        let api_state = std::sync::Arc::new(grpc_service.clone());
         let grpc_server = RsBrokerServer::new(grpc_service);
 
         let grpc_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -202,7 +213,7 @@ impl TestHarness {
             }
         });
 
-        // ----- HTTP server (health endpoint) ---------------------------------
+        // ----- HTTP server (health + /api/v1 REST/SSE) -----------------------
         use axum::{routing::get, Json, Router};
         use serde_json::json;
 
@@ -213,7 +224,9 @@ impl TestHarness {
             }))
         }
 
-        let http_app = Router::new().route("/health", get(health_handler));
+        let http_app = Router::new()
+            .route("/health", get(health_handler))
+            .nest("/api/v1", rs_broker_server::http::router(api_state));
         let http_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind http listener");
@@ -231,6 +244,9 @@ impl TestHarness {
             db_pool,
             grpc_addr: format!("http://{}", grpc_addr),
             http_addr: format!("http://{}", http_addr),
+            database_url,
+            kafka_bootstrap,
+            event_sender,
             _containers: Containers {
                 _postgres: postgres,
                 _kafka: kafka,
@@ -238,6 +254,12 @@ impl TestHarness {
             _grpc_task: grpc_task,
             _http_task: http_task,
         }
+    }
+
+    /// Broadcast a `DeliverEvent` exactly as the Kafka consumer loop would,
+    /// for SSE stream tests without a live Kafka round-trip.
+    pub fn broadcast_event(&self, event: DeliverEvent) {
+        let _ = self.event_sender.send(event);
     }
 
     /// Build a gRPC client connected to the harness's gRPC server.

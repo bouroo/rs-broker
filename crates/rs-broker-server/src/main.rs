@@ -5,6 +5,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod adapters;
 mod app;
 mod grpc;
+mod http;
 mod metrics;
 
 #[tokio::main]

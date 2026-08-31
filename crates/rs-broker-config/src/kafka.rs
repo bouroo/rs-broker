@@ -184,8 +184,34 @@ pub struct ConsumerConfig {
     /// Topics the consumer subscribes to at startup.
     ///
     /// Leave empty to disable the consumer pipeline.
-    #[serde(default)]
+    ///
+    /// Accepts either a TOML list or a comma-separated string — the latter
+    /// is what the `RS_BROKER_KAFKA__CONSUMER__TOPICS` environment override
+    /// carries (env values reach the config layer as strings).
+    #[serde(default, deserialize_with = "deserialize_topics")]
     pub topics: Vec<String>,
+}
+
+/// Deserialize topics from a list or a comma-separated string.
+fn deserialize_topics<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        List(Vec<String>),
+        Joined(String),
+    }
+
+    match Raw::deserialize(deserializer)? {
+        Raw::List(topics) => Ok(topics),
+        Raw::Joined(joined) => Ok(joined
+            .split(',')
+            .map(|topic| topic.trim().to_string())
+            .filter(|topic| !topic.is_empty())
+            .collect()),
+    }
 }
 
 fn default_group_id() -> String {

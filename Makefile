@@ -78,15 +78,15 @@ docker-build-dev:
 	docker build -t rs-broker:dev --target development .
 
 compose-up:
-	@echo "Starting docker-compose services..."
-	docker-compose up -d
+	@echo "Starting docker compose services..."
+	docker compose up -d
 
 compose-down:
-	@echo "Stopping docker-compose services..."
-	docker-compose down -v
+	@echo "Stopping docker compose services..."
+	docker compose down -v
 
 compose-logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # ---------------------------------------------------------------------------
 # Proto & Migrations

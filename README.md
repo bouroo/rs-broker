@@ -7,12 +7,13 @@
 [![Contributors](https://img.shields.io/github/contributors/bouroo/rs-broker)](https://github.com/bouroo/rs-broker/graphs/contributors)
 [![Stars](https://img.shields.io/github/stars/bouroo/rs-broker?style=flat)](https://github.com/bouroo/rs-broker)
 
-A Rust-based microservice implementing the inbox/outbox pattern to decouple Kafka complexity from downstream services. It provides a unified gRPC interface for both message publishing and consumption, handling retry logic, dead-letter queues, and idempotency automatically.
+A Rust-based microservice implementing the inbox/outbox pattern to decouple Kafka complexity from downstream services. It provides a unified gRPC and HTTP/JSON interface for both message publishing and consumption, handling retry logic, dead-letter queues, and idempotency automatically.
 
 ## ✨ Features
 
 - 📦 **Inbox/Outbox Pattern** — Reliable message delivery using database-backed outbox and inbox tables
 - 🔌 **gRPC Interface** — Type-safe API for both publishing and subscribing to Kafka topics
+- 🌐 **HTTP REST + SSE API** — Full JSON parity with the gRPC surface under `/api/v1`, including an SSE event stream
 - 🔄 **Automatic Retry Logic** — Exponential backoff with configurable retry policies and jitter
 - ☠️ **Dead Letter Queue (DLQ)** — Automatic routing of failed messages for later analysis
 - 🔒 **Circuit Breaker** — Protection against downstream service failures
@@ -25,7 +26,7 @@ A Rust-based microservice implementing the inbox/outbox pattern to decouple Kafk
 ```mermaid
 flowchart TB
     subgraph rsbroker["rs-broker Service"]
-        grpc["gRPC Interface Layer<br/>[tonic + Axum]"]
+        grpc["API Interface Layer<br/>gRPC [tonic] + REST/SSE [axum]"]
         
         subgraph producer["Producer Mode"]
             outbox["Outbox Manager<br/>• Message Store<br/>• Retry Scheduler<br/>• DLQ Router"]
@@ -66,27 +67,27 @@ cd rs-broker
 cp .env.example .env
 
 # Core services (PostgreSQL, Kafka, rs-broker)
-docker-compose up -d
+docker compose up -d
 
 # With Kafka UI (optional)
-docker-compose --profile ui up -d
+docker compose --profile ui up -d
 
 # Full stack with monitoring (optional)
-docker-compose --profile full up -d
+docker compose --profile full up -d
 ```
 
 Verify services:
 
 ```bash
 curl http://localhost:8080/health   # Health check
-curl http://localhost:9090/metrics  # Metrics endpoint
+curl http://localhost:8080/metrics  # Prometheus metrics
 ```
 
 ### Local Development
 
 ```bash
 # Start infrastructure only
-docker-compose up -d postgres kafka
+docker compose up -d postgres kafka
 
 # Build and run rs-broker locally
 cargo build --release && cargo run --release
@@ -104,9 +105,11 @@ RS_BROKER_SERVER__MODE=consumer cargo run   # Consumer only
 
 | Port | Protocol | Description |
 |------|----------|-------------|
-| 8080 | HTTP | REST API & health checks |
+| 8080 | HTTP | REST + SSE API (`/api/v1`), `/health`, `/metrics` |
 | 50051 | gRPC | gRPC service |
-| 9090 | HTTP | Prometheus metrics |
+
+Prometheus metrics are served from the `metrics.path` (`/metrics`) on the same
+HTTP port as the API.
 
 ### Publishing Messages (gRPC)
 
@@ -141,14 +144,34 @@ grpcurl -plaintext -d '{
 }' localhost:50051 rsbroker.RsBroker/SubscribeEvents
 ```
 
+### HTTP REST + SSE (parity with gRPC)
+
+The same operations are available as JSON under `/api/v1` on the HTTP port —
+see [docs/http-api.md](docs/http-api.md):
+
+```bash
+# Publish
+curl -s localhost:8080/api/v1/publish -H 'content-type: application/json' -d '{
+  "aggregate_type": "Order",
+  "aggregate_id": "order-123",
+  "event_type": "OrderCreated",
+  "payload": {"amount": 100, "currency": "USD"},
+  "topic": "orders"
+}'
+
+# Stream events (SSE, pattern-filtered)
+curl -N "localhost:8080/api/v1/events/stream?subscriber_id=demo&patterns=orders.*"
+```
+
 ## ⚙️ Configuration
 
 Configuration is loaded in the following order (later sources override earlier):
 
 1. `config/default.toml` — Base configuration
-2. `config/{environment}.toml` — Environment-specific config
-3. Environment variables with `RS_BROKER_` prefix
-4. Command-line arguments
+2. `config/{RS_BROKER_ENV}.toml` — Environment overlay (default `development`; file optional)
+3. Environment variables with the `RS_BROKER_` prefix, using `__` as the path
+   separator (e.g. `RS_BROKER_SERVER__HTTP_PORT=8080`,
+   `RS_BROKER_KAFKA__CONSUMER__TOPICS=events,orders`)
 
 ### Server
 
@@ -180,7 +203,8 @@ Configuration is loaded in the following order (later sources override earlier):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RS_BROKER_KAFKA__BROKERS` | `localhost:9092` | Kafka broker addresses |
-| `RS_BROKER_KAFKA__CONSUMER_GROUP_ID` | `rs-broker-consumer` | Consumer group ID |
+| `RS_BROKER_KAFKA__CONSUMER__GROUP_ID` | `rs-broker-consumer` | Consumer group ID |
+| `RS_BROKER_KAFKA__CONSUMER__TOPICS` | - | Comma-separated topics for the consumer pipeline (empty disables it) |
 | `RS_BROKER_KAFKA__CLIENT_ID` | `rs-broker` | Client ID |
 | `RS_BROKER_KAFKA__SECURITY_PROTOCOL` | `plaintext` | Security protocol |
 | `RS_BROKER_KAFKA__SASL_MECHANISM` | `PLAIN` | SASL mechanism |
@@ -204,7 +228,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RUST_LOG` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
 | `RS_BROKER_LOGGING__FORMAT` | `json` | Log format: `json` or `pretty` |
 | `RS_BROKER_METRICS__ENABLED` | `true` | Enable Prometheus metrics |
-| `RS_BROKER_METRICS__PORT` | `9090` | Metrics port |
+| `RS_BROKER_METRICS__PATH` | `/metrics` | Metrics endpoint path (served on the HTTP port) |
 
 ## 📁 Project Structure
 
@@ -235,6 +259,31 @@ rs-broker/
 cargo test                           # All tests
 cargo test -- --nocapture            # Verbose output
 cargo test -p rs-broker-core         # Specific crate
+```
+
+Integration tests (`rs-broker-server`) need PostgreSQL + Kafka. By default they
+spin their own containers via [testcontainers](https://crates.io/crates/testcontainers)
+(Docker required). To point them at already-running services instead:
+
+```bash
+TEST_DATABASE_URL=postgres://rsbroker:rsbroker_dev_password@localhost:5432/rsbroker \
+TEST_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+cargo test --workspace
+```
+
+### CI/CD
+
+GitHub Actions live in [.github/workflows/](.github/workflows/):
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `rust.yml` | push/PR to `main`, `develop` | fmt + clippy (`-D warnings`) + check, then the full test suite against postgres + kafka service containers |
+| `release.yml` | tag `v*` | GitHub Release with generated notes, static linux binaries (amd64/arm64 musl, sha256), and a multi-arch (`amd64`+`arm64`) image pushed to `ghcr.io/bouroo/rs-broker` |
+
+Pull the released image:
+
+```bash
+docker pull ghcr.io/bouroo/rs-broker:latest
 ```
 
 ### Running Migrations
@@ -301,12 +350,12 @@ docker build -t rs-broker:mysql --build-arg DATABASE_FEATURE=mysql .
 ```bash
 # Basic run with env file
 docker run -d --name rs-broker \
-  -p 8080:8080 -p 50051:50051 -p 9090:9090 \
+  -p 8080:8080 -p 50051:50051 \
   --env-file .env rs-broker:latest
 
 # With inline overrides
 docker run -d --name rs-broker \
-  -p 8080:8080 -p 50051:50051 -p 9090:9090 \
+  -p 8080:8080 -p 50051:50051 \
   -e RS_BROKER_DATABASE__HOST=postgres \
   -e RS_BROKER_KAFKA__BROKERS=kafka:9092 \
   rs-broker:latest
@@ -326,11 +375,11 @@ docker run -d --name rs-broker \
 | `full` | All services | Complete stack |
 
 ```bash
-docker-compose up -d                              # Core only
-docker-compose --profile ui up -d                 # With Kafka UI
-docker-compose --profile producer --profile consumer up -d  # Split deployment
-docker-compose --profile full up -d               # Full stack
-docker-compose down -v                            # Cleanup
+docker compose up -d                              # Core only
+docker compose --profile ui up -d                 # With Kafka UI
+docker compose --profile producer --profile consumer up -d  # Split deployment
+docker compose --profile full up -d               # Full stack
+docker compose down -v                            # Cleanup
 ```
 
 ### Demo Script

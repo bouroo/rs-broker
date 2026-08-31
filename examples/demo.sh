@@ -6,7 +6,7 @@
 #
 # Prerequisites:
 #   - grpcurl installed (https://github.com/fullstorydev/grpcurl)
-#   - rs-broker running (docker-compose up -d)
+#   - rs-broker running (docker compose up -d)
 #
 # Usage:
 #   ./demo.sh
@@ -47,7 +47,7 @@ check_connection() {
         log_info "Connected successfully"
     else
         log_error "Cannot connect to rs-broker at ${GRPC_HOST}"
-        log_info "Make sure rs-broker is running: docker-compose up -d"
+        log_info "Make sure rs-broker is running: docker compose up -d"
         exit 1
     fi
 }
