@@ -15,6 +15,7 @@ use crate::shared::error::Result;
 const REPROCESS_BATCH_LIMIT: i64 = 10_000;
 
 /// DLQ handler for managing dead letter messages
+#[derive(Clone)]
 pub struct DlqHandler {
     repository: Arc<dyn DlqRepository>,
 }
