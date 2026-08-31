@@ -63,8 +63,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: release-${{ matrix.target }}
-      - name: Install protoc, cmake, libcurl headers
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake libcurl4-openssl-dev
+      # NOTE: no host libcurl here — cross-compiled librdkafka must not pick
+      # up the host (glibc) curl; cmake then disables WITH_CURL (optional
+      # feature, unused by this workspace) and the musl build stays static.
+      - name: Install protoc and cmake
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
       - name: Build (zigbuild)
         run: cargo zigbuild --release --target ${{ matrix.target }} --bin rs-broker
       - name: Package
