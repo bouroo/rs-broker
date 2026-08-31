@@ -10,11 +10,11 @@
 # - Optional Schema Registry for Avro
 #
 # Usage:
-#   docker-compose up -d                    # Start core services
-#   docker-compose --profile demo up -d     # Start with demo client
-#   docker-compose --profile ui up -d       # Start with Kafka UI
-#   docker-compose --profile full up -d     # Start everything
-#   docker-compose down -v                  # Cleanup with volumes
+#   docker compose up -d                    # Start core services
+#   docker compose --profile demo up -d     # Start with demo client
+#   docker compose --profile ui up -d       # Start with Kafka UI
+#   docker compose --profile full up -d     # Start everything
+#   docker compose down -v                  # Cleanup with volumes
 # =============================================================================
 
 x-healthcheck-defaults: &healthcheck-defaults
@@ -40,7 +40,7 @@ x-database-env: &database-env
   RS_BROKER_DATABASE__AUTO_MIGRATE: "true"
 
 x-kafka-env: &kafka-env
-  RS_BROKER_KAFKA__BROKERS: kafka:9092
+  RS_BROKER_KAFKA__BROKERS: kafka:29092
   RS_BROKER_KAFKA__CONSUMER__GROUP_ID: rs-broker-consumer
   RS_BROKER_KAFKA__CLIENT_ID: rs-broker
 
@@ -62,11 +62,15 @@ services:
       POSTGRES_USER: rsbroker
       POSTGRES_PASSWORD: rsbroker_dev_password
       POSTGRES_DB: rsbroker
+      # postgres:18+ requires the data directory inside the mount point.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     volumes:
+      # No initdb mount: the app applies migrations itself (AUTO_MIGRATE=true,
+      # tracked in schema_migrations); pre-applying them via
+      # /docker-entrypoint-initdb.d double-applies and breaks startup.
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "pg_isready -U rsbroker -d rsbroker"]
@@ -84,8 +88,11 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_NODE_ID: 1
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      # Dual listener: PLAINTEXT for in-network clients (kafka:29092),
+      # PLAINTEXT_HOST for host clients (localhost:9092 via the port map).
+      # Advertised listener names must all appear in listeners.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -282,7 +289,7 @@ services:
     environment:
       <<: [*common-env]
       KAFKA_CLUSTERS_0_NAME: rs-broker-local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
     networks:
       - backend
@@ -301,7 +308,7 @@ services:
     environment:
       <<: [*common-env]
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAPSERVERS: kafka:9092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAPSERVERS: kafka:29092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
     healthcheck:
       <<: *healthcheck-defaults

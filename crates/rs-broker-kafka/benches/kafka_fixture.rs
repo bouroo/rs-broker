@@ -1,7 +1,7 @@
 //! Kafka test fixture for benchmarks
 //!
 //! Provides a simple fixture that connects to Kafka for benchmarks.
-//! Assumes Kafka is running externally (e.g., via docker-compose).
+//! Assumes Kafka is running externally (e.g., via docker compose).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use std::time::Duration;
 /// Kafka fixture for benchmarks
 ///
 /// This fixture connects to a Kafka broker. In development, you can use:
-/// - Docker Compose: Use the docker-compose.yml in the project root (KRaft mode - no Zookeeper)
+/// - Docker Compose: Use the docker compose.yml in the project root (KRaft mode - no Zookeeper)
 /// - Manual: docker run -p 9092:9092 -p 9093:9093 confluentinc/cp-kafka:8.0.4 with KRaft configuration
 pub struct KafkaFixture {
     /// Bootstrap servers string

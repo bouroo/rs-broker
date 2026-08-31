@@ -24,9 +24,9 @@
 //! export DATABASE_URL="postgres://postgres:postgres@localhost/postgres"
 //! ```
 //!
-//! Or use docker-compose to start a PostgreSQL instance:
+//! Or use docker compose to start a PostgreSQL instance:
 //! ```bash
-//! docker-compose up -d postgres
+//! docker compose up -d postgres
 //! ```
 
 mod inbox;
