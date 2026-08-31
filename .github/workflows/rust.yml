@@ -79,6 +79,14 @@ jobs:
           CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
         ports:
           - 9092:9092
+        # Broker-ready gate (TCP-open is not broker-ready); GitHub holds the
+        # job until the service reports healthy.
+        options: >-
+          --health-cmd "kafka-broker-api-versions --bootstrap-server localhost:9092"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 24
+          --health-start-period 30s
     env:
       TEST_DATABASE_URL: postgres://rsbroker:rsbroker_dev_password@localhost:5432/rsbroker
       TEST_KAFKA_BOOTSTRAP_SERVERS: localhost:9092
@@ -91,15 +99,6 @@ jobs:
           prefix-key: test
       - name: Install protoc and libcurl headers (rdkafka-sys cmake build)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libcurl4-openssl-dev
-      - name: Wait for Kafka to accept connections
-        run: |
-          for i in $(seq 1 45); do
-            if (exec 3<>/dev/tcp/localhost/9092) 2>/dev/null; then
-              echo "Kafka is up"; exit 0
-            fi
-            echo "waiting for kafka ($i/45)"; sleep 2
-          done
-          echo "kafka did not become ready" >&2; exit 1
       - name: Run workspace tests
         run: cargo test --workspace --features postgres
       - name: Check no-default-features (stub) compiles
