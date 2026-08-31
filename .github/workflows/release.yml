@@ -59,8 +59,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: release-${{ matrix.target }}
-      - name: Install protoc and cmake
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      - name: Install protoc, cmake, libcurl headers
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake libcurl4-openssl-dev
       - name: Build (zigbuild)
         run: cargo zigbuild --release --target ${{ matrix.target }} --bin rs-broker
       - name: Package

@@ -35,8 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: lint
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install protoc and libcurl headers (rdkafka-sys cmake build)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libcurl4-openssl-dev
       - name: Fast verify (fmt-check, clippy -D warnings, check)
         run: ./scripts/verify.sh fast
 
@@ -89,8 +89,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: test
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install protoc and libcurl headers (rdkafka-sys cmake build)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libcurl4-openssl-dev
       - name: Wait for Kafka to accept connections
         run: |
           for i in $(seq 1 45); do
