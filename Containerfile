@@ -68,6 +68,9 @@ FROM gcr.io/distroless/cc-debian12:latest AS runtime-distroless
 WORKDIR /app
 
 COPY --from=builder /app/rs-broker /app/
+# Default configuration baked in so the image boots standalone; env
+# overrides (RS_BROKER_*) or a config mount take precedence.
+COPY --from=builder /app/config /app/config
 
 USER nonroot:nonroot
 
@@ -91,6 +94,7 @@ RUN addgroup -g 1000 rsbroker && \
     adduser -u 1000 -G rsbroker -s /bin/sh -D rsbroker
 
 COPY --from=builder /app/rs-broker /app/
+COPY --from=builder /app/config /app/config
 
 RUN chown -R rsbroker:rsbroker /app
 
