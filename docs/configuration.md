@@ -9,9 +9,8 @@ This document defines the configuration schema for rs-broker, supporting mode sw
 Configuration is loaded in the following order (later sources override earlier):
 
 1. `config/default.toml` - Base configuration
-2. `config/{environment}.toml` - Environment-specific config
-3. Environment variables with `RS_BROKER_` prefix
-4. Command-line arguments
+2. `config/{RS_BROKER_ENV}.toml` - Environment overlay (default `development`; optional file)
+3. Environment variables with the `RS_BROKER_` prefix, using `__` as the path separator
 
 ## Configuration Schema
 
@@ -360,17 +359,23 @@ enabled = false
 
 ## Environment Variables
 
-All configuration values can be overridden via environment variables using the prefix `RS_BROKER_`:
+All configuration values can be overridden via environment variables with the
+`RS_BROKER_` prefix, using `__` as the path separator. `RS_BROKER_ENV`
+(default `development`) selects the optional `config/{RS_BROKER_ENV}.toml`
+overlay applied after `config/default.toml`.
 
 | Environment Variable | Config Path | Example |
 |---------------------|-------------|---------|
-| `RS_BROKER_SERVER_MODE` | `server.mode` | `producer` |
-| `RS_BROKER_SERVER_HTTP_PORT` | `server.http_port` | `8080` |
-| `RS_BROKER_DATABASE_HOST` | `database.host` | `db.example.com` |
-| `RS_BROKER_DATABASE_PASSWORD` | `database.password` | `secret123` |
-| `RS_BROKER_KAFKA_BROKERS` | `kafka.brokers` | `kafka1:9092,kafka2:9092` |
-| `RS_BROKER_KAFKA_USERNAME` | `kafka.sasl_username` | `user` |
-| `RS_BROKER_KAFKA_PASSWORD` | `kafka.sasl_password` | `password` |
+| `RS_BROKER_ENV` | overlay file selector | `production` |
+| `RS_BROKER_SERVER__MODE` | `server.mode` | `producer` |
+| `RS_BROKER_SERVER__HTTP_PORT` | `server.http_port` | `8080` |
+| `RS_BROKER_DATABASE__HOST` | `database.host` | `db.example.com` |
+| `RS_BROKER_DATABASE__PASSWORD` | `database.password` | `secret123` |
+| `RS_BROKER_KAFKA__BROKERS` | `kafka.brokers` | `kafka1:9092,kafka2:9092` |
+| `RS_BROKER_KAFKA__CONSUMER__GROUP_ID` | `kafka.consumer.group_id` | `billing-consumer` |
+| `RS_BROKER_KAFKA__CONSUMER__TOPICS` | `kafka.consumer.topics` | `events,orders,payments` |
+| `RS_BROKER_KAFKA__USERNAME` | `kafka.sasl_username` | `user` |
+| `RS_BROKER_KAFKA__PASSWORD` | `kafka.sasl_password` | `password` |
 
 ## Configuration Types (Rust)
 
@@ -403,11 +408,11 @@ impl Settings {
             .add_source(config::File::with_name("config/default"))
             .add_source(
                 config::Environment::with_prefix("RS_BROKER")
-                    .separator("__")
-                    .try_parsing(true)
+                    .prefix_separator("_")
+                    .separator("__"),
             )
             .build()?;
-        
+
         config.try_deserialize()
     }
 }

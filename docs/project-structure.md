@@ -475,13 +475,15 @@ rs-broker/
 │   ├── project-structure.md
 │   └── configuration.md
 │
-└── tests/
-    ├── integration/
-    │   ├── outbox_test.rs
-    │   ├── inbox_test.rs
-    │   └── e2e_test.rs
-    └── fixtures/
-        └── test-data.json
+└── tests/ → per-crate integration tests (see crates/*/tests)
+    ├── crates/rs-broker-core/benches/       # domain benchmarks
+    ├── crates/rs-broker-db/benches/         # repository benchmarks
+    ├── crates/rs-broker-kafka/benches/      # producer/consumer/e2e benches
+    └── crates/rs-broker-server/
+        ├── tests/integration_test.rs        # gRPC suite (Postgres+Kafka)
+        ├── tests/http_api_test.rs           # REST/SSE parity suite
+        ├── tests/app_e2e_test.rs            # full-app pipeline (REST→Kafka→SSE)
+        └── tests/common/mod.rs              # shared TestHarness
 ```
 
 ## Key Module Interfaces

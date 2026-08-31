@@ -2,7 +2,7 @@
 
 ## Overview
 
-`rs-broker` is a Rust-based microservice implementing the inbox/outbox pattern to decouple Kafka complexity from downstream services. It provides a unified gRPC interface for both message publishing and consumption, handling retry logic, dead-letter queues, and idempotency automatically.
+`rs-broker` is a Rust-based microservice implementing the inbox/outbox pattern to decouple Kafka complexity from downstream services. It provides a unified interface — gRPC and HTTP/JSON (REST + SSE) — for both message publishing and consumption, handling retry logic, dead-letter queues, and idempotency automatically.
 
 ## Core Principles
 
@@ -21,7 +21,7 @@ dependencies pointing strictly inward:
 |---|---|---|
 | Entities (domain) | `rs-broker-core::shared`, `rs-broker-core::features/*/domain` | Entities with behaviour (`OutboxMessage::evaluate_publish_failure`, `Subscriber::matches_topic`), value objects, the topic matcher |
 | Use cases (application) | `rs-broker-core::features/*/use_cases|accept|handler|dispatcher` | `AcceptMessage`, `OutboxPublisher`, `InboxManager`, `SubscriberRegistry`, `SubscriberDispatcher`, `DlqHandler` |
-| Interface adapters | `rs-broker-db` (sqlx repos), `rs-broker-kafka` (`KafkaMessageSink`), `rs-broker-server::{adapters,grpc,metrics}` | proto<->DTO conversion, persistence, transport |
+| Interface adapters | `rs-broker-db` (sqlx repos), `rs-broker-kafka` (`KafkaMessageSink`), `rs-broker-server::{adapters,grpc,http,metrics}` | proto/JSON<->DTO conversion, persistence, transport |
 | Frameworks & drivers | sqlx, rdkafka, tonic/axum, `rs-broker-config` | external machinery |
 
 Dependency rule (compiler-enforced): `rs-broker-core` has **no** dependency on
@@ -30,12 +30,26 @@ features declare ports (repository traits, `MessageSink`, `SubscriberNotifier`)
 and the outward crates implement them. Composition (adapter construction and
 injection) happens only in `rs-broker-server`.
 
+## Transport Layer
+
+Both client-facing transports share one `RsBrokerService` instance and the
+same transport-free `*_inner` methods, so behavior, validation, and error text
+are identical across gRPC and REST:
+
+| Transport | Where | Notes |
+|---|---|---|
+| gRPC (tonic, port 50051) | `rs-broker-server::grpc` | Full proto surface incl. server-stream and bidi `StreamPublish` |
+| REST + SSE (axum, port 8080, `/api/v1`) | `rs-broker-server::http` | 1:1 mapping of every RPC (see [http-api.md](http-api.md)); `SubscribeEvents` → SSE stream, `StreamPublish` → batch endpoint |
+
+Subscriber **push delivery** (the broker calling a registered subscriber's
+`Deliver` callback) is gRPC-only; HTTP clients consume via the SSE stream.
+
 ## High-Level Architecture
 
 ```mermaid
 flowchart TB
     subgraph rsbroker["rs-broker Service"]
-        grpc["gRPC Interface Layer<br/>[tonic + Axum]"]
+        grpc["API Interface Layer<br/>gRPC [tonic] + REST/SSE [axum]"]
         
         subgraph producer["Producer Mode"]
             outbox["Outbox Manager<br/>• Message Store<br/>• Retry Scheduler<br/>• DLQ Router"]
@@ -70,7 +84,7 @@ flowchart TB
     client["Client Service"]
     
     subgraph rsbroker["rs-broker"]
-        handler["1. gRPC Handler<br/>• Validate request<br/>• Generate message_id<br/>• Extract headers"]
+        handler["1. API Handler (gRPC or REST)<br/>• Validate request<br/>• Generate message_id<br/>• Extract headers"]
         outbox["2. Outbox Manager<br/>• Begin transaction<br/>• Insert to outbox table<br/>• Commit transaction"]
         publisher["3. Background Publisher<br/>• Poll outbox [PENDING]<br/>• Publish to Kafka<br/>• Update status [PUBLISHED]"]
         success["Success<br/>Mark as PUBLISHED"]
@@ -83,7 +97,7 @@ flowchart TB
     kafka["Confluent Kafka<br/>Topic: events"]
     dlq["DLQ Topic<br/>Topic: events.dlq"]
     
-    client -->|gRPC PublishRequest| handler
+    client -->|PublishRequest (gRPC or REST)| handler
     handler --> outbox
     outbox --> publisher
     publisher --> success
@@ -179,7 +193,7 @@ stateDiagram-v2
 ## Idempotency Design
 
 ### Producer Side
-- Message ID generated as UUID v4 at ingestion
+- Message ID generated as UUID v7 at ingestion (time-ordered; client-supplied IDs accepted for idempotency)
 - Unique constraint on `outbox.message_id`
 - Duplicate publish attempts return existing message status
 
@@ -208,13 +222,13 @@ Segments are separated by `.`. An inline `*` within a segment (e.g., `order*`) a
 flowchart LR
     subgraph producerFlow["PRODUCER FLOW"]
         client["Client Service"]
-        handler["gRPC Handler"]
+        handler["API Handler (gRPC or REST)"]
         outboxTable["Outbox Table"]
         publisher["Publisher Worker"]
         kafkaTopic["Kafka Topic"]
         dlqTopic["DLQ Topic"]
-        
-        client -->|gRPC| handler
+
+        client -->|publish| handler
         handler -->|Insert| outboxTable
         outboxTable -->|Poll| publisher
         publisher --> kafkaTopic
@@ -246,7 +260,7 @@ flowchart LR
 | Separate outbox/inbox tables | Clear separation of concerns, independent scaling |
 | Background publisher worker | Non-blocking API responses, batch efficiency |
 | Database-agnostic via sqlx | Support PostgreSQL, MariaDB with feature flags |
-| gRPC over HTTP REST | Type safety, streaming support, better performance |
+| Dual transport over one service core | gRPC for type-safe service-to-service clients; REST + SSE (`/api/v1`) for everything else — both delegate to the same transport-free `*_inner` methods, so behavior cannot drift |
 | Idempotency at database level | Guaranteed deduplication even under failures |
 | Configurable retry policies | Adapt to different SLA requirements |
 | DLQ per topic pattern | Easier monitoring and reprocessing |
