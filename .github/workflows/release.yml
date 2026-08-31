@@ -48,16 +48,18 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            digests: digests-amd64
             platform: linux/amd64
             runner: ubuntu-latest
           - arch: aarch64
+            digests: digests-arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: digests-${{ matrix.arch }}
+          name: ${{ matrix.digests }}
           path: /tmp/digests
       - name: Pull image by digest
         run: |
