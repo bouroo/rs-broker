@@ -116,6 +116,12 @@ crates/rs-broker-server/
     ├── grpc/
     │   ├── mod.rs
     │   └── service.rs       # gRPC interface adapter (delegates to core use cases)
+    ├── http/
+    │   ├── mod.rs           # /api/v1 router over the shared RsBrokerService
+    │   ├── routes.rs        # REST handlers (same *_inner methods as gRPC)
+    │   ├── dto.rs           # serde DTOs + proto conversions
+    │   ├── error.rs         # tonic::Status -> HTTP error mapping
+    │   └── sse.rs           # SSE event stream (SubscribeEvents parity)
     └── metrics.rs           # Prometheus metrics registry
 ```
 
@@ -465,16 +471,19 @@ rs-broker/
 │   ├── architecture.md
 │   ├── data-model.md
 │   ├── grpc-proto.md
+│   ├── http-api.md
 │   ├── project-structure.md
 │   └── configuration.md
 │
-└── tests/
-    ├── integration/
-    │   ├── outbox_test.rs
-    │   ├── inbox_test.rs
-    │   └── e2e_test.rs
-    └── fixtures/
-        └── test-data.json
+└── tests/ → per-crate integration tests (see crates/*/tests)
+    ├── crates/rs-broker-core/benches/       # domain benchmarks
+    ├── crates/rs-broker-db/benches/         # repository benchmarks
+    ├── crates/rs-broker-kafka/benches/      # producer/consumer/e2e benches
+    └── crates/rs-broker-server/
+        ├── tests/integration_test.rs        # gRPC suite (Postgres+Kafka)
+        ├── tests/http_api_test.rs           # REST/SSE parity suite
+        ├── tests/app_e2e_test.rs            # full-app pipeline (REST→Kafka→SSE)
+        └── tests/common/mod.rs              # shared TestHarness
 ```
 
 ## Key Module Interfaces

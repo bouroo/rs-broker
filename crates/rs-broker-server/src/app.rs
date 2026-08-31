@@ -30,6 +30,8 @@ pub struct App {
     grpc_addr: SocketAddr,
     shutdown_tx: broadcast::Sender<()>,
     grpc_service: RsBrokerServer<grpc::service::RsBrokerService>,
+    /// Inner service, shared with the HTTP REST/SSE router (`/api/v1`).
+    grpc_service_inner: grpc::service::RsBrokerService,
     /// Outbox publisher kept on the `App` so its background task can be
     /// stopped from the shutdown path. `None` when database features are
     /// disabled (the publisher is not constructible in that build).
@@ -108,7 +110,7 @@ impl AppBuilder {
         #[cfg(not(any(feature = "postgres", feature = "mysql")))]
         let grpc_service_inner = grpc::service::RsBrokerService::new(());
 
-        let grpc_service = RsBrokerServer::new(grpc_service_inner);
+        let grpc_service = RsBrokerServer::new(grpc_service_inner.clone());
 
         // Build the outbox publisher over its ports: the sqlx outbox adapter
         // and the Kafka message sink. Composition happens here (the
@@ -181,6 +183,7 @@ impl AppBuilder {
             grpc_addr,
             shutdown_tx,
             grpc_service,
+            grpc_service_inner: grpc_service_inner.clone(),
             publisher: Some(publisher),
             consumer,
             metrics,
@@ -205,8 +208,20 @@ impl App {
     /// `metrics_path` that serves the Prometheus text exposition format from
     /// `metrics`. The endpoint is served on the same HTTP port as the rest of
     /// the API.
-    fn router(metrics: Arc<Metrics>, metrics_enabled: bool, metrics_path: String) -> Router {
-        let mut router = Router::new().route("/health", get(health_handler));
+    ///
+    /// The REST + SSE API (`/api/v1/*`) is mounted over the same
+    /// [`RsBrokerService`] instance that backs the gRPC server, so both
+    /// transports share one state (broadcast channel, repositories, use
+    /// cases).
+    fn router(
+        metrics: Arc<Metrics>,
+        metrics_enabled: bool,
+        metrics_path: String,
+        api_state: Arc<grpc::service::RsBrokerService>,
+    ) -> Router {
+        let mut router = Router::new()
+            .route("/health", get(health_handler))
+            .nest("/api/v1", crate::http::router(api_state));
 
         if metrics_enabled {
             router = router.route(
@@ -240,6 +255,16 @@ impl App {
         let metrics = self.metrics;
         let metrics_enabled = settings.metrics.enabled;
         let metrics_path = settings.metrics.path.clone();
+
+        // Share one service instance across both transports: the axum router
+        // holds an Arc of a clone; tonic keeps the owned service
+        // (RsBrokerService is Clone — pooled/arced internals).
+        let api_state: Arc<grpc::service::RsBrokerService> =
+            Arc::new(self.grpc_service_inner.clone());
+
+        let router = Self::router(metrics, metrics_enabled, metrics_path, api_state);
+
+        // Start gRPC server in background
 
         // Start gRPC server in background
         tokio::spawn(async move {
@@ -296,9 +321,7 @@ impl App {
         let listener = tokio::net::TcpListener::bind(self.http_addr).await?;
         tracing::info!("Starting HTTP server on {}", self.http_addr);
 
-        let app = Self::router(metrics, metrics_enabled, metrics_path);
-
-        axum::serve(listener, app)
+        axum::serve(listener, router)
             .with_graceful_shutdown(shutdown_signal(shutdown_tx))
             .await?;
 

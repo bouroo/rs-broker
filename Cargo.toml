@@ -59,6 +59,7 @@ anyhow = "1.0"
 uuid = { version = "1.6", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+base64 = "0.22"
 
 # Internal crates
 rs-broker-core = { path = "crates/rs-broker-core" }

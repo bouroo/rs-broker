@@ -11,6 +11,7 @@ pub use rs_broker_core::features::subscription::ports::{SubscriberError, Subscri
 use rs_broker_core::features::subscription::Subscriber;
 
 /// SQLx-based subscriber repository
+#[derive(Clone)]
 pub struct SqlxSubscriberRepository {
     pool: DbPool,
 }

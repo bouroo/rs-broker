@@ -1,6 +1,10 @@
 # rs-broker gRPC Proto Definition
 
-This document describes the gRPC service interface for rs-broker. The actual proto file will be located at `proto/rs_broker.proto`.
+This document describes the gRPC service interface for rs-broker. The proto file lives at `proto/rs_broker.proto`.
+
+Every RPC below also has an HTTP/JSON equivalent under `/api/v1` served by the
+same service core — see [http-api.md](http-api.md) for the route table, JSON
+shapes, and SSE event stream.
 
 ## Service Overview
 
