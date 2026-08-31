@@ -61,7 +61,7 @@ flowchart TB
             sub["Kafka Consumer<br/>[rdkafka]"]
         end
         
-        db["Database Layer<br/>[sqlx]<br/>PostgreSQL | MariaDB"]
+        db["Database Layer<br/>[sqlx]<br/>PostgreSQL / MariaDB"]
     end
     
     grpc --> producer
@@ -97,7 +97,7 @@ flowchart TB
     kafka["Confluent Kafka<br/>Topic: events"]
     dlq["DLQ Topic<br/>Topic: events.dlq"]
     
-    client -->|PublishRequest (gRPC or REST)| handler
+    client -->|"PublishRequest - gRPC or REST"| handler
     handler --> outbox
     outbox --> publisher
     publisher --> success
