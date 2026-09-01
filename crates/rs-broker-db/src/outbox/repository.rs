@@ -122,6 +122,62 @@ impl OutboxRepository for SqlxOutboxRepository {
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
+    async fn claim_pending(
+        &self,
+        limit: i64,
+        lease_secs: i32,
+    ) -> Result<Vec<OutboxMessage>, OutboxError> {
+        // Atomic claim: the subquery takes candidate rows with SKIP LOCKED so
+        // concurrent publishers never wait on each other, and the outer UPDATE
+        // flips them to `publishing` in the same statement — each claimed set
+        // is exclusive to this caller. Rows already in `publishing` past the
+        // lease were abandoned by a crashed publisher and are safe to reclaim
+        // (draining is at-least-once; consumers dedup by message_id). The
+        // lease is measured against the database clock: `updated_at` is
+        // trigger-maintained on this table, so it is the authoritative
+        // last-touch time.
+        let rows = sqlx::query_as::<_, OutboxMessageRow>(
+            r#"
+            UPDATE outbox_messages
+            SET status = 'publishing', updated_at = NOW()
+            WHERE id IN (
+                SELECT id FROM outbox_messages
+                WHERE status IN ('pending', 'retrying')
+                   OR (status = 'publishing' AND updated_at < NOW() - ($2::int * INTERVAL '1 second'))
+                ORDER BY created_at ASC
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+            "#,
+        )
+        .bind(limit)
+        .bind(lease_secs)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage)?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Guarded by `status = 'publishing'` so rows another publisher
+        // re-claimed after the lease expired are not marked from here.
+        let result = sqlx::query(
+            "UPDATE outbox_messages SET status = 'published', published_at = NOW(), updated_at = NOW() WHERE id = ANY($1) AND status = 'publishing'",
+        )
+        .bind(ids.to_vec())
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
+
+        Ok(result.rows_affected())
+    }
+
     async fn update_status(
         &self,
         id: Uuid,
@@ -283,6 +339,48 @@ impl OutboxRepository for SqlxOutboxRepository {
         .await.map_err(storage)?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn claim_pending(
+        &self,
+        limit: i64,
+        _lease_secs: i32,
+    ) -> Result<Vec<OutboxMessage>, OutboxError> {
+        // MySQL/MariaDB have no portable claim-and-return form (no
+        // UPDATE..RETURNING; MariaDB lacks SKIP LOCKED), so claiming stays
+        // read-only: draining against MySQL remains correct only with a
+        // single publisher replica, as before.
+        self.get_pending(limit).await
+    }
+
+    async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut marked = 0u64;
+        // Placeholder-bound chunks stay well under the prepared-statement
+        // parameter limit for any configured batch size.
+        for chunk in ids.chunks(1000) {
+            let placeholders = std::iter::repeat("?")
+                .take(chunk.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "UPDATE outbox_messages SET status = 'published', published_at = NOW(), updated_at = NOW() WHERE id IN ({placeholders})"
+            );
+            let mut query = sqlx::query(&sql);
+            for id in chunk {
+                query = query.bind(*id);
+            }
+            marked += query
+                .execute(&self.pool)
+                .await
+                .map_err(storage)?
+                .rows_affected();
+        }
+
+        Ok(marked)
     }
 
     async fn update_status(
