@@ -98,6 +98,38 @@ impl OutboxRepository for MockOutboxRepository {
         Ok(pending)
     }
 
+    async fn claim_pending(
+        &self,
+        limit: i64,
+        _lease_secs: i32,
+    ) -> Result<Vec<OutboxMessage>, OutboxError> {
+        let mut guard = self.messages.lock().unwrap();
+        let mut claimed = Vec::new();
+        for msg in guard.values_mut() {
+            if claimed.len() >= limit as usize {
+                break;
+            }
+            if matches!(msg.status, MessageStatus::Pending | MessageStatus::Retrying) {
+                msg.status = MessageStatus::Publishing;
+                claimed.push(msg.clone());
+            }
+        }
+        Ok(claimed)
+    }
+
+    async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError> {
+        let mut guard = self.messages.lock().unwrap();
+        let mut marked = 0u64;
+        for id in ids {
+            if let Some(msg) = guard.get_mut(id) {
+                msg.status = MessageStatus::Published;
+                msg.published_at = Some(chrono::Utc::now());
+                marked += 1;
+            }
+        }
+        Ok(marked)
+    }
+
     async fn increment_retry(
         &self,
         id: Uuid,
