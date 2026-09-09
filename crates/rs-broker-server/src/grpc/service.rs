@@ -40,11 +40,8 @@ use rs_broker_db::{
 // `tonic::Status` as the Err variant exceeds clippy's `result_large_err`
 // threshold; matching the generated proto traits' own exemption.
 #[allow(clippy::result_large_err)]
-async fn process_publish(
-    use_case: &AcceptMessage,
-    req: PublishRequest,
-) -> Result<PublishResponse, Status> {
-    let input = PublishRequestInput {
+fn publish_input(req: PublishRequest) -> PublishRequestInput {
+    PublishRequestInput {
         message_id: Some(req.message_id),
         aggregate_type: req.aggregate_type,
         aggregate_id: req.aggregate_id,
@@ -53,7 +50,15 @@ async fn process_publish(
         headers: req.headers.into_iter().map(|h| (h.key, h.value)).collect(),
         topic: req.topic,
         partition_key: Some(req.partition_key).filter(|k| !k.is_empty()),
-    };
+    }
+}
+
+#[allow(clippy::result_large_err)]
+async fn process_publish(
+    use_case: &AcceptMessage,
+    req: PublishRequest,
+) -> Result<PublishResponse, Status> {
+    let input = publish_input(req);
 
     let message_id = use_case.apply(input).await.map_err(|e| match e {
         // Wire-compatible error text (validation messages preserved).
@@ -69,6 +74,53 @@ async fn process_publish(
         duplicate: false,
         accepted_at: Utc::now().timestamp(),
         error: String::new(),
+    })
+}
+
+/// Shared batch adapter: validates every request, stores valid messages in one
+/// transaction, and preserves the API's per-message result contract.
+#[allow(clippy::result_large_err)]
+async fn process_publish_batch(
+    use_case: &AcceptMessage,
+    req: PublishBatchRequest,
+) -> Result<PublishBatchResponse, Status> {
+    let results = use_case
+        .apply_batch(req.messages.into_iter().map(publish_input).collect())
+        .await;
+
+    let mut responses = Vec::with_capacity(results.len());
+    let mut success_count = 0;
+    let mut failure_count = 0;
+
+    for result in results {
+        match result {
+            Ok(message_id) => {
+                success_count += 1;
+                responses.push(PublishResponse {
+                    message_id: message_id.to_string(),
+                    status: ProtoMessageStatus::Pending.into(),
+                    duplicate: false,
+                    accepted_at: Utc::now().timestamp(),
+                    error: String::new(),
+                });
+            }
+            Err(error) => {
+                failure_count += 1;
+                responses.push(PublishResponse {
+                    message_id: String::new(),
+                    status: ProtoMessageStatus::Pending.into(),
+                    duplicate: false,
+                    accepted_at: 0,
+                    error: error.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(PublishBatchResponse {
+        responses,
+        success_count,
+        failure_count,
     })
 }
 
@@ -153,34 +205,7 @@ impl RsBrokerService {
         &self,
         req: PublishBatchRequest,
     ) -> Result<PublishBatchResponse, Status> {
-        let mut responses = Vec::new();
-        let mut success_count = 0;
-        let mut failure_count = 0;
-
-        for msg_req in req.messages {
-            match self.publish_inner(msg_req).await {
-                Ok(resp) => {
-                    success_count += 1;
-                    responses.push(resp);
-                }
-                Err(e) => {
-                    failure_count += 1;
-                    responses.push(PublishResponse {
-                        message_id: String::new(),
-                        status: ProtoMessageStatus::Pending.into(),
-                        duplicate: false,
-                        accepted_at: 0,
-                        error: e.message().to_string(),
-                    });
-                }
-            }
-        }
-
-        Ok(PublishBatchResponse {
-            responses,
-            success_count,
-            failure_count,
-        })
+        process_publish_batch(&self.accept_message, req).await
     }
 
     /// Shared body of the message status RPC.
