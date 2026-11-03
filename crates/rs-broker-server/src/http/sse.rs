@@ -1,7 +1,7 @@
 //! SSE handler: `GET /api/v1/events/stream` — the REST equivalent of the
 //! gRPC `SubscribeEvents` server-stream. Subscribes to the same broadcast
 //! channel the gRPC stream uses and applies the same unified topic matcher
-//! (`rs_broker_core::matches_any`), so both transports agree on delivery.
+//! (`rs_broker_core::shared::topic::matches_any`), so both transports agree on delivery.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -61,7 +61,7 @@ pub async fn events_stream(
         async move {
             match result {
                 Ok(event) => {
-                    if rs_broker_core::matches_any(&event.topic, &patterns) {
+                    if rs_broker_core::shared::topic::matches_any(&event.topic, &patterns) {
                         let dto = crate::http::dto::DeliverEventDto::from(event);
                         match serde_json::to_string(&dto) {
                             Ok(json) => Some(Ok(Event::default().event("deliver").data(json))),

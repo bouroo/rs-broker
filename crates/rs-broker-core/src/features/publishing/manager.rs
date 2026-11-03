@@ -43,17 +43,6 @@ impl OutboxManager {
         }
     }
 
-    /// Create a new outbox manager with a custom repository (for testing)
-    pub fn with_repository(
-        repository: std::sync::Arc<dyn OutboxRepository>,
-        retry_config: RetryConfig,
-    ) -> Self {
-        Self {
-            repository,
-            retry_strategy: RetryStrategy::new(retry_config),
-        }
-    }
-
     /// Create a new message in the outbox
     pub async fn create_message(
         &self,

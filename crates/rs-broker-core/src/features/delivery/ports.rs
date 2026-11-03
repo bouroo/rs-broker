@@ -53,6 +53,7 @@ pub enum NotificationError {
 }
 
 /// Port: notify one subscriber endpoint about a message.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait SubscriberNotifier: Send + Sync {
     /// Attempt delivery to `endpoint`. Implementations must bound the call's

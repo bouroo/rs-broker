@@ -8,11 +8,11 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
-use rs_broker_core::features::subscription::ports::SubscriberRepository;
+use rs_broker_core::features::consuming::{Dispatcher, InboxManager};
 #[cfg(any(feature = "postgres", feature = "mysql"))]
-use rs_broker_core::grpc_client::dispatcher::SubscriberDispatcher;
-use rs_broker_core::inbox::{Dispatcher, InboxManager};
-use rs_broker_core::outbox::OutboxPublisher;
+use rs_broker_core::features::delivery::dispatcher::SubscriberDispatcher;
+use rs_broker_core::features::publishing::OutboxPublisher;
+use rs_broker_core::features::subscription::ports::SubscriberRepository;
 use rs_broker_db::{
     create_pool, run_migrations, SqlxInboxRepository, SqlxOutboxRepository,
     SqlxSubscriberRepository,

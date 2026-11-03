@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use rs_broker_core::dlq::handler::DlqHandler;
+use rs_broker_core::features::dead_letter::handler::DlqHandler;
 use rs_broker_core::features::dead_letter::ports::DlqError;
 use rs_broker_core::features::dead_letter::DlqMessage;
 use serde_json::json;
@@ -117,7 +117,7 @@ impl rs_broker_core::features::dead_letter::ports::DlqRepository for MockDlqRepo
 fn create_test_dlq_handler() -> DlqHandler {
     let mock_repo = std::sync::Arc::new(MockDlqRepository::new())
         as std::sync::Arc<dyn rs_broker_core::features::dead_letter::ports::DlqRepository>;
-    DlqHandler::with_repository(mock_repo)
+    DlqHandler::new(mock_repo)
 }
 
 /// Benchmark moving a single message to DLQ

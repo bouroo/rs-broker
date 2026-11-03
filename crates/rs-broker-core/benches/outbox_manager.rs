@@ -4,10 +4,10 @@
 use async_trait::async_trait;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rs_broker_config::RetryConfig;
+use rs_broker_core::features::publishing::manager::OutboxManager;
 use rs_broker_core::features::publishing::{
     MessageStatus, OutboxError, OutboxMessage, OutboxRepository,
 };
-use rs_broker_core::outbox::manager::OutboxManager;
 
 use serde_json::json;
 use tokio::runtime::Runtime;
@@ -147,7 +147,7 @@ impl OutboxRepository for MockOutboxRepository {
 fn create_test_outbox_manager() -> OutboxManager {
     let mock_repo = std::sync::Arc::new(MockOutboxRepository::new());
     let retry_config = RetryConfig::default();
-    OutboxManager::with_repository(mock_repo, retry_config)
+    OutboxManager::new(mock_repo, retry_config)
 }
 
 /// Benchmark single message creation

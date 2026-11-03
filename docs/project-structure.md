@@ -40,7 +40,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Bouroo Team"]
@@ -144,7 +144,7 @@ Core business logic for inbox/outbox patterns.
 crates/rs-broker-core/
 ├── Cargo.toml
 ├── src/
-│   ├── lib.rs                # Canonical re-exports + compat shims for old paths
+│   ├── lib.rs                # Crate root: declares `shared` and `features`
 │   ├── shared/
 │   │   ├── error.rs          # Core error type (framework-free)
 │   │   └── topic.rs          # MQTT-standard topic pattern matching
@@ -158,7 +158,7 @@ crates/rs-broker-core/
 │       │   └── ports.rs      # OutboxRepository + MessageSink ports
 │       ├── consuming/        # The inbox ingest path
 │       │   ├── domain.rs     # InboxMessage + transitions
-│       │   ├── use_cases.rs  # InboxManager
+│       │   ├── manager.rs    # InboxManager
 │       │   ├── dispatcher.rs # Consumed-message dispatch with pattern cache
 │       │   ├── dedup.rs      # Deduplication (atomic check_and_mark)
 │       │   └── ports.rs      # InboxRepository port
@@ -173,6 +173,8 @@ crates/rs-broker-core/
 │           ├── domain.rs     # DlqMessage
 │           ├── handler.rs    # DlqHandler use case
 │           └── ports.rs      # DlqRepository port
+├── tests/
+│   └── architecture.rs        # Executable gate over the cargo dependency DAG
 └── benches/                  # Targets the same features (unchanged names)
     ├── lib.rs                # Dedup, dispatch, pattern, registry benchmarks
     ├── fan_out.rs # Sequential vs concurrent fan-out
@@ -323,14 +325,20 @@ flowchart TB
     server --> core
     server --> kafka
     server --> config
-    core --> db
-    core --> proto
-    kafka --> proto
+    server --> db
+    server --> proto
+    core --> config
+    db --> core
+    kafka --> core
     db --> external
     kafka --> external
     proto --> external
     config --> external
 ```
+
+This graph is enforced at build time by
+`crates/rs-broker-core/tests/architecture.rs`, which reads the same dependency
+DAG from `cargo metadata` and fails the build on a reversed edge.
 
 ## Feature Flags
 
@@ -366,81 +374,90 @@ rs-broker/
 ├── README.md
 │
 ├── crates/
-│   ├── rs-broker-server/
+│   ├── rs-broker-server/           # Composition root + transport adapters
 │   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── main.rs
-│   │       ├── lib.rs
-│   │       ├── server.rs
-│   │       ├── grpc_service.rs
-│   │       └── shutdown.rs
+│   │   ├── src/
+│   │   │   ├── main.rs              # Binary entry point
+│   │   │   ├── lib.rs
+│   │   │   ├── app.rs               # App builder + consumer/publisher loops
+│   │   │   ├── metrics.rs
+│   │   │   ├── adapters/            # Driven adapter: gRPC subscriber notifier
+│   │   │   ├── grpc/                # Driving adapter: gRPC service
+│   │   │   └── http/                # Driving adapter: REST + SSE
+│   │   ├── tests/                   # gRPC, REST/SSE, and app e2e suites
+│   │   │   ├── integration_test.rs
+│   │   │   ├── http_api_test.rs
+│   │   │   ├── app_e2e_test.rs
+│   │   │   └── common/mod.rs        # Shared TestHarness
+│   │   └── benches/
 │   │
-│   ├── rs-broker-core/
+│   ├── rs-broker-core/              # Domain + usecase + ports (no infrastructure)
 │   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── error.rs
-│   │       ├── outbox/
-│   │       │   ├── mod.rs
-│   │       │   ├── manager.rs
-│   │       │   ├── publisher.rs
-│   │       │   └── retry.rs
-│   │       ├── inbox/
-│   │       │   ├── mod.rs
-│   │       │   ├── manager.rs
-│   │       │   ├── dispatcher.rs
-│   │       │   └── dedup.rs
-│   │       ├── dlq/
-│   │       │   ├── mod.rs
-│   │       │   └── handler.rs
-│   │       └── subscriber/
-│   │           ├── mod.rs
-│   │           └── registry.rs
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── shared/              # Framework-free building blocks
+│   │   │   │   ├── error.rs
+│   │   │   │   └── topic.rs
+│   │   │   └── features/            # One directory per bounded feature
+│   │   │       ├── publishing/      # outbox write path
+│   │   │       │   ├── domain.rs
+│   │   │       │   ├── accept.rs
+│   │   │       │   ├── manager.rs
+│   │   │       │   ├── publisher.rs
+│   │   │       │   ├── retry.rs
+│   │   │       │   └── ports.rs
+│   │   │       ├── consuming/       # inbox ingest path
+│   │   │       │   ├── domain.rs
+│   │   │       │   ├── manager.rs
+│   │   │       │   ├── dispatcher.rs
+│   │   │       │   ├── dedup.rs
+│   │   │       │   └── ports.rs
+│   │   │       ├── subscription/    # subscriber registry + matching
+│   │   │       │   ├── domain.rs
+│   │   │       │   ├── registry.rs
+│   │   │       │   └── ports.rs
+│   │   │       ├── delivery/        # fan-out to subscribers
+│   │   │       │   ├── dispatcher.rs
+│   │   │       │   └── ports.rs
+│   │   │       └── dead_letter/     # DLQ routing and reprocessing
+│   │   │           ├── domain.rs
+│   │   │           ├── handler.rs
+│   │   │           └── ports.rs
+│   │   ├── tests/
+│   │   │   └── architecture.rs      # Executable dependency-direction gate
+│   │   └── benches/                 # Domain benchmarks
 │   │
-│   ├── rs-broker-proto/
+│   ├── rs-broker-proto/             # Generated protobuf code
 │   │   ├── Cargo.toml
 │   │   ├── build.rs
-│   │   └── src/
-│   │       └── lib.rs
+│   │   └── src/lib.rs
 │   │
-│   ├── rs-broker-db/
+│   ├── rs-broker-db/                # Driven adapter: sqlx repositories
 │   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── pool.rs
-│   │       ├── migration.rs
-│   │       ├── outbox/
-│   │       │   ├── mod.rs
-│   │       │   ├── entity.rs
-│   │       │   └── repository.rs
-│   │       ├── inbox/
-│   │       │   ├── mod.rs
-│   │       │   ├── entity.rs
-│   │       │   └── repository.rs
-│   │       ├── subscriber/
-│   │       │   ├── mod.rs
-│   │       │   ├── entity.rs
-│   │       │   └── repository.rs
-│   │       └── dlq/
-│   │           ├── mod.rs
-│   │           ├── entity.rs
-│   │           └── repository.rs
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── pool.rs
+│   │   │   ├── migration.rs
+│   │   │   ├── outbox/              # SqlxOutboxRepository
+│   │   │   ├── inbox/               # SqlxInboxRepository
+│   │   │   ├── subscriber/          # SqlxSubscriberRepository
+│   │   │   └── dlq/                 # SqlxDlqRepository
+│   │   ├── tests/outbox_claim_test.rs
+│   │   └── benches/
 │   │
-│   ├── rs-broker-kafka/
+│   ├── rs-broker-kafka/             # Driven adapter: Kafka producer/consumer
 │   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── config.rs
-│   │       ├── error.rs
-│   │       ├── headers.rs
-│   │       ├── producer/
-│   │       │   ├── mod.rs
-│   │       │   └── client.rs
-│   │       └── consumer/
-│   │           ├── mod.rs
-│   │           └── client.rs
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── adapters.rs          # KafkaMessageSink
+│   │   │   ├── config.rs
+│   │   │   ├── error.rs
+│   │   │   ├── headers.rs
+│   │   │   ├── producer/
+│   │   │   └── consumer/
+│   │   └── benches/
 │   │
-│   └── rs-broker-config/
+│   └── rs-broker-config/            # Typed configuration
 │       ├── Cargo.toml
 │       └── src/
 │           ├── lib.rs
@@ -453,20 +470,17 @@ rs-broker/
 │
 ├── proto/
 │   └── rs_broker.proto
-│
 ├── migrations/
 │   ├── 20260227000000_create_outbox.sql
 │   ├── 20260227000001_create_inbox.sql
 │   ├── 20260227000002_create_subscribers.sql
 │   ├── 20260227000003_create_inbox_deliveries.sql
 │   └── 20260227000004_create_dlq_messages.sql
-│
 ├── config/
 │   ├── default.toml
 │   ├── development.toml
 │   ├── production.toml
 │   └── test.toml
-│
 ├── docs/
 │   ├── architecture.md
 │   ├── data-model.md
@@ -474,16 +488,7 @@ rs-broker/
 │   ├── http-api.md
 │   ├── project-structure.md
 │   └── configuration.md
-│
-└── tests/ → per-crate integration tests (see crates/*/tests)
-    ├── crates/rs-broker-core/benches/       # domain benchmarks
-    ├── crates/rs-broker-db/benches/         # repository benchmarks
-    ├── crates/rs-broker-kafka/benches/      # producer/consumer/e2e benches
-    └── crates/rs-broker-server/
-        ├── tests/integration_test.rs        # gRPC suite (Postgres+Kafka)
-        ├── tests/http_api_test.rs           # REST/SSE parity suite
-        ├── tests/app_e2e_test.rs            # full-app pipeline (REST→Kafka→SSE)
-        └── tests/common/mod.rs              # shared TestHarness
+└── baseline/                        # Recorded refactor baseline evidence
 ```
 
 ## Key Module Interfaces
@@ -492,22 +497,31 @@ rs-broker/
 
 ```rust
 // crates/rs-broker-core/src/lib.rs
-pub mod dlq;
-pub mod error;
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-pub mod grpc_client;
-pub mod inbox;
-pub mod outbox;
-pub mod subscriber;
-pub mod topic;
+pub mod features;
+pub mod shared {
+    pub mod error;
+    pub mod topic;
+}
+```
 
-pub use dlq::{DlqHandler, DlqSelector, ReprocessResult};
-pub use error::{Error, Result};
-pub use inbox::InboxManager;
-#[cfg(any(feature = "postgres", feature = "mysql"))]
-pub use outbox::OutboxManager;
-pub use subscriber::SubscriberRegistry;
-pub use topic::{matches_any, matches_topic};
+Every core symbol has exactly one canonical path:
+
+```rust
+// crates/rs-broker-core/src/features/consuming/mod.rs
+pub use manager::InboxManager;          // rs_broker_core::features::consuming::InboxManager
+pub use dispatcher::Dispatcher;         // rs_broker_core::features::consuming::Dispatcher
+
+// crates/rs-broker-core/src/features/publishing/mod.rs
+pub use accept::{AcceptError, AcceptMessage, PublishRequestInput};
+
+// crates/rs-broker-core/src/features/dead_letter/mod.rs
+pub use handler::{DlqHandler, DlqSelector, ReprocessResult};
+
+// crates/rs-broker-core/src/features/delivery/mod.rs
+pub use dispatcher::{SubscriberDispatcher, CircuitBreaker, CircuitBreakerConfig};
+
+// crates/rs-broker-core/src/shared/error.rs
+pub type Result<T> = std::result::Result<T, Error>;   // rs_broker_core::shared::error::Result
 ```
 
 ### Database Module Exports

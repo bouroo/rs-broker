@@ -18,6 +18,7 @@ pub enum SubscriberError {
 }
 
 /// Port: durable storage for subscriber registrations.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait SubscriberRepository: Send + Sync {
     /// Create a new subscriber

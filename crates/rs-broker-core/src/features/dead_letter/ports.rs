@@ -18,6 +18,7 @@ pub enum DlqError {
 }
 
 /// Port: durable storage for dead-lettered messages.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait DlqRepository: Send + Sync {
     /// Create a new DLQ message

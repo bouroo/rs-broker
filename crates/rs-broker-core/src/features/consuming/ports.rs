@@ -18,6 +18,7 @@ pub enum InboxError {
 }
 
 /// Port: durable storage for inbox messages.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait InboxRepository: Send + Sync {
     /// Create a new inbox message
