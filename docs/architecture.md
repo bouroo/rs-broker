@@ -20,7 +20,7 @@ dependencies pointing strictly inward:
 | Layer | Where | Contents |
 |---|---|---|
 | Entities (domain) | `rs-broker-core::shared`, `rs-broker-core::features/*/domain` | Entities with behaviour (`OutboxMessage::evaluate_publish_failure`, `Subscriber::matches_topic`), value objects, the topic matcher |
-| Use cases (application) | `rs-broker-core::features/*/use_cases|accept|handler|dispatcher` | `AcceptMessage`, `OutboxPublisher`, `InboxManager`, `SubscriberRegistry`, `SubscriberDispatcher`, `DlqHandler` |
+| Use cases (application) | `rs-broker-core::features/*/manager|accept|handler|dispatcher` | `AcceptMessage`, `OutboxPublisher`, `InboxManager`, `SubscriberRegistry`, `SubscriberDispatcher`, `DlqHandler` |
 | Interface adapters | `rs-broker-db` (sqlx repos), `rs-broker-kafka` (`KafkaMessageSink`), `rs-broker-server::{adapters,grpc,http,metrics}` | proto/JSON<->DTO conversion, persistence, transport |
 | Frameworks & drivers | sqlx, rdkafka, tonic/axum, `rs-broker-config` | external machinery |
 
@@ -29,6 +29,12 @@ Dependency rule (compiler-enforced): `rs-broker-core` has **no** dependency on
 features declare ports (repository traits, `MessageSink`, `SubscriberNotifier`)
 and the outward crates implement them. Composition (adapter construction and
 injection) happens only in `rs-broker-server`.
+
+The rule is executable, not prose: `crates/rs-broker-core/tests/architecture.rs`
+parses the `cargo metadata` dependency DAG and fails the build when a reversed
+edge appears (core importing an infrastructure crate, a driven adapter
+depending on the composition root, or `rs-broker-config` depending on any
+workspace member).
 
 ## Transport Layer
 
@@ -205,7 +211,7 @@ stateDiagram-v2
 
 ## Topic Matching
 
-Subscriber `topic_patterns` use MQTT-standard wildcard semantics, evaluated by a single unified matcher (`rs-broker-core::topic`):
+Subscriber `topic_patterns` use MQTT-standard wildcard semantics, evaluated by a single unified matcher (`rs-broker-core::shared::topic`):
 
 | Wildcard | Meaning |
 |----------|---------|
