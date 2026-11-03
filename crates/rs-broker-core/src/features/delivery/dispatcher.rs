@@ -535,7 +535,7 @@ mod tests {
     /// produces a result for every subscriber and preserves `subscriber_id`.
     #[tokio::test]
     async fn dispatch_to_all_returns_one_fast_fail_result_per_subscriber() {
-        use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
+        use crate::features::delivery::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
         let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
 
@@ -607,7 +607,7 @@ mod tests {
     /// accumulated by a live subscriber were silently forgotten.
     #[tokio::test]
     async fn merge_subscribers_preserves_circuit_breaker_state() {
-        use crate::grpc_client::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
+        use crate::features::delivery::dispatcher::{CircuitBreaker, CircuitBreakerConfig};
 
         let sd = SubscriberDispatcher::new(test_subscriber_repository(), test_notifier());
         let s = Subscriber::new("svc-a".into(), "http://a:1".into(), vec!["orders.*".into()]);

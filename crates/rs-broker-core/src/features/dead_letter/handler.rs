@@ -26,11 +26,6 @@ impl DlqHandler {
         Self { repository }
     }
 
-    /// Create a new DLQ handler with a custom repository (for testing)
-    pub fn with_repository(repository: Arc<dyn DlqRepository>) -> Self {
-        Self { repository }
-    }
-
     /// Move a message to the DLQ
     pub async fn move_to_dlq(
         &self,

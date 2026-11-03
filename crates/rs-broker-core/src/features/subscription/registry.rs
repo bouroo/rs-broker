@@ -5,7 +5,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::{ports::SubscriberRepository, Subscriber};
-use crate::error::Result;
+use crate::shared::error::Result;
 
 /// Subscriber registry for managing subscribers
 pub struct SubscriberRegistry {
@@ -15,11 +15,6 @@ pub struct SubscriberRegistry {
 impl SubscriberRegistry {
     /// Create a new subscriber registry
     pub fn new(repository: Arc<dyn SubscriberRepository>) -> Self {
-        Self { repository }
-    }
-
-    /// Create a new subscriber registry with a custom repository (for testing)
-    pub fn with_repository(repository: Arc<dyn SubscriberRepository>) -> Self {
         Self { repository }
     }
 

@@ -58,12 +58,6 @@ impl SubscriberCache {
         self.order.push_back(topic.clone());
         self.entries.insert(topic, subscribers);
     }
-
-    #[allow(dead_code)]
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.order.clear();
-    }
 }
 
 /// Message dispatcher
@@ -78,18 +72,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     /// Create a new dispatcher
-    pub fn new(repository: Arc<dyn SubscriberRepository>) -> Self {
-        Self {
-            subscriber_repository: repository,
-            pattern_cache: Arc::new(RwLock::new(SubscriberCache::new(
-                DEFAULT_PATTERN_CACHE_CAPACITY,
-            ))),
-            subscriber_dispatcher: None,
-        }
-    }
-
-    /// Create a new dispatcher with a custom subscriber repository (for testing)
-    pub fn with_repository(subscriber_repository: Arc<dyn SubscriberRepository>) -> Self {
+    pub fn new(subscriber_repository: Arc<dyn SubscriberRepository>) -> Self {
         Self {
             subscriber_repository,
             pattern_cache: Arc::new(RwLock::new(SubscriberCache::new(

@@ -339,7 +339,7 @@ fn bench_publisher_concurrent(c: &mut Criterion) {
                                 }
                             }
 
-                            Ok::<(), rs_broker_core::error::Error>(())
+                            Ok::<(), rs_broker_core::shared::error::Error>(())
                         }
                     });
 

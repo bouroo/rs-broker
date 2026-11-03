@@ -3,11 +3,11 @@
 pub mod dedup;
 pub mod dispatcher;
 pub mod domain;
+pub mod manager;
 pub mod ports;
-pub mod use_cases;
 
 pub use dedup::Deduplicator;
 pub use dispatcher::Dispatcher;
 pub use domain::{InboxMessage, InboxStatus};
+pub use manager::InboxManager;
 pub use ports::{InboxError, InboxRepository};
-pub use use_cases::InboxManager;

@@ -18,11 +18,6 @@ impl InboxManager {
         Self { repository }
     }
 
-    /// Create a new inbox manager with a custom repository (for testing)
-    pub fn with_repository(repository: Arc<dyn InboxRepository>) -> Self {
-        Self { repository }
-    }
-
     /// Store a message in the inbox
     pub async fn store_message(
         &self,

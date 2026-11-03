@@ -1,0 +1,153 @@
+$ cargo test --workspace --offline --lib
+exit=0 duration=3.2s
+
+running 12 tests
+test database::tests::database_config_explicit_url_takes_precedence ... ok
+test database::tests::database_config_default_builds_url_from_components ... ok
+test database::tests::database_config_mysql_scheme ... ok
+test database::tests::database_config_url_includes_password_when_set ... ok
+test database::tests::database_type_display ... ok
+test kafka::tests::consumer_config_deserializes_group_id_alias ... ok
+test kafka::tests::kafka_config_deserializes_brokers_alias ... ok
+test kafka::tests::kafka_config_defaults ... ok
+test kafka::tests::producer_config_defaults ... ok
+test server::tests::server_config_defaults ... ok
+test server::tests::server_mode_deserializes_lowercase ... ok
+test settings::tests::env_overrides_nest_with_double_underscore ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 78 tests
+test features::consuming::dispatcher::tests::subscriber_cache_evicts_oldest_on_overflow ... ok
+test features::consuming::domain::tests::inbox_status_default_is_received ... ok
+test features::consuming::domain::tests::inbox_status_serializes_as_snake_case ... ok
+test features::consuming::domain::tests::inbox_status_display_round_trips ... ok
+test features::consuming::domain::tests::inbox_message_new_generates_unique_ids ... ok
+test features::consuming::dispatcher::tests::subscriber_cache_reinsert_does_not_change_order ... ok
+test features::consuming::dedup::tests::check_and_mark_returns_true_for_new_key ... ok
+test features::consuming::dispatcher::tests::subscriber_cache_preserves_capacity_after_many_evictions ... ok
+test features::consuming::domain::tests::inbox_message_new_creates_expected_defaults ... ok
+test features::consuming::dedup::tests::check_and_mark_preserves_recent_keys ... ok
+test features::consuming::dedup::tests::check_and_mark_evicts_oldest_at_capacity ... ok
+test features::dead_letter::domain::tests::dlq_message_new_creates_expected_values ... ok
+test features::consuming::dedup::tests::check_and_mark_returns_false_for_duplicate ... ok
+test features::delivery::dispatcher::tests::default_fan_out_concurrency_matches_documented_constant ... ok
+test features::delivery::dispatcher::tests::dispatch_to_all_empty_subscriber_set_returns_empty_vec ... ok
+test features::dead_letter::domain::tests::dlq_message_round_trips_serde ... ok
+test features::delivery::dispatcher::tests::merge_subscribers_preserves_circuit_breaker_state ... ok
+test features::delivery::dispatcher::tests::outcome_to_delivery_result_maps_grpc_error ... ok
+test features::delivery::dispatcher::tests::merge_subscribers_removes_gone_and_adds_new ... ok
+test features::delivery::dispatcher::tests::outcome_to_delivery_result_maps_success ... ok
+test features::delivery::dispatcher::tests::dispatch_to_all_returns_one_fast_fail_result_per_subscriber ... ok
+test features::delivery::dispatcher::tests::outcome_to_delivery_result_maps_timeout ... ok
+test features::delivery::dispatcher::tests::outcome_to_delivery_result_does_not_panic_on_any_outcome ... ok
+test features::publishing::domain::tests::message_status_default_is_pending ... ok
+test features::publishing::domain::tests::message_status_display_round_trips ... ok
+test features::publishing::accept::tests::batch_preserves_explicit_message_ids_and_headers ... ok
+test features::publishing::accept::tests::batch_uses_one_create_batch_and_preserves_invalid_entries ... ok
+test features::publishing::domain::tests::message_status_serializes_as_snake_case ... ok
+test features::publishing::domain::tests::outbox_message_new_creates_expected_defaults ... ok
+test features::publishing::domain::tests::outbox_message_new_generates_unique_ids ... ok
+test features::publishing::retry::tests::test_calculate_delay_exponential_growth ... ok
+test features::publishing::retry::tests::test_calculate_delay_first_attempt ... ok
+test features::publishing::publisher::tests::claims_batch_sends_and_marks_published_in_one_call ... ok
+test features::publishing::retry::tests::test_calculate_delay_respects_max ... ok
+test features::publishing::publisher::tests::exhausted_retries_route_to_dlq ... ok
+test features::publishing::publisher::tests::send_failure_schedules_retry_and_is_not_batch_marked ... ok
+test features::publishing::retry::tests::test_clone ... ok
+test features::publishing::retry::tests::test_dlq_disabled ... ok
+test features::publishing::retry::tests::test_dlq_enabled ... ok
+test features::publishing::retry::tests::test_retry_strategy_creation ... ok
+test features::publishing::retry::tests::test_should_retry_at_limit ... ok
+test features::publishing::retry::tests::test_should_retry_within_limit ... ok
+test features::publishing::retry::tests::test_zero_retries ... ok
+test features::subscription::domain::tests::subscriber_active_defaults_to_true ... ok
+test features::subscription::domain::tests::subscriber_new_creates_expected_defaults ... ok
+test features::subscription::domain::tests::subscriber_new_generates_unique_ids ... ok
+test features::subscription::domain::tests::subscriber_topic_patterns_are_stored ... ok
+test shared::topic::tests::anchor_complex_patterns ... ok
+test shared::topic::tests::anchor_no_match_different_segments ... ok
+test shared::topic::tests::anchor_realistic_scenarios ... ok
+test shared::topic::tests::double_dot_empty_segment ... ok
+test shared::topic::tests::empty_topic_and_pattern_match ... ok
+test shared::topic::tests::empty_topic_does_not_match_nonempty_pattern ... ok
+test shared::topic::tests::exact_match ... ok
+test shared::topic::tests::hash_at_root_matches_everything ... ok
+test shared::topic::tests::hash_matches_multi_segment_suffix ... ok
+test shared::topic::tests::hash_matches_zero_segments ... ok
+test shared::topic::tests::hash_not_treated_as_wildcard_when_not_alone ... ok
+test shared::topic::tests::inline_star_empty_prefix_matches_anything ... ok
+test shared::topic::tests::inline_star_matches_multi_segment_topic ... ok
+test shared::topic::tests::inline_star_prefix_glob ... ok
+test shared::topic::tests::inline_star_prefix_glob_no_match ... ok
+test shared::topic::tests::inline_star_segment_shorter_than_prefix ... ok
+test shared::topic::tests::matches_any_empty_patterns_is_false ... ok
+test shared::topic::tests::matches_any_returns_false_when_no_hit ... ok
+test shared::topic::tests::matches_any_returns_true_on_first_hit ... ok
+test shared::topic::tests::nonempty_topic_does_not_match_empty_pattern ... ok
+test shared::topic::tests::pattern_exhausted_before_topic ... ok
+test shared::topic::tests::plus_does_not_match_multi ... ok
+test shared::topic::tests::plus_matches_one_segment ... ok
+test shared::topic::tests::plus_middle_matches_one_segment ... ok
+test shared::topic::tests::plus_then_hash_matches_multi ... ok
+test shared::topic::tests::realistic_payment_topic ... ok
+test shared::topic::tests::realistic_service_topic ... ok
+test shared::topic::tests::star_full_segment_does_not_match_multi ... ok
+test shared::topic::tests::star_full_segment_does_not_match_other_prefix ... ok
+test shared::topic::tests::star_full_segment_matches_one ... ok
+test shared::topic::tests::star_middle_matches_one_segment ... ok
+
+test result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test pool::tests::database_config_default_produces_expected_values ... ok
+test pool::tests::default_database_url_returns_expected_string ... ok
+test pool::tests::pool_error_database_displays_cause ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 21 tests
+test grpc::service::subscribe_events_filter::empty_patterns_match_nothing ... ok
+test grpc::service::subscribe_events_filter::plus_and_hash_wildcards ... ok
+test grpc::service::subscribe_events_filter::single_segment_star_wildcard ... ok
+test http::dto::tests::dlq_query_defaults ... ok
+test http::dto::tests::message_status_strings ... ok
+test http::dto::tests::deliver_event_dto_serializes_json_payload ... ok
+test http::dto::tests::publish_request_base64_roundtrip ... ok
+test http::dto::tests::publish_request_dto_minimal ... ok
+test http::dto::tests::publish_request_payload_and_base64_mutually_exclusive ... ok
+test http::dto::tests::publish_response_json_payload_passes_through ... ok
+test http::dto::tests::publish_request_topic_optional ... ok
+test http::dto::tests::publish_response_non_json_payload_falls_back_to_base64 ... ok
+test http::error::tests::error_body_carries_code_and_message ... ok
+test http::error::tests::maps_argument_and_notfound_codes ... ok
+test http::error::tests::maps_conflict_family_codes ... ok
+test http::error::tests::maps_transport_and_server_codes ... ok
+test metrics::tests::metrics_is_send_sync_and_clone ... ok
+test metrics::tests::inbox_and_subscriber_metrics_work ... ok
+test metrics::tests::new_registers_all_metrics ... ok
+test metrics::tests::publish_duration_histogram_observes_values ... ok
+test metrics::tests::record_methods_increment_labeled_counters ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.33s
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_config-3730118b7d1d21ba)
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_core-4033b5e8ee3c927b)
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_db-1ac6e7909161efef)
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_kafka-9f34ec6cee0fd79a)
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_proto-6f5acccc9cd89a86)
+     Running unittests src/lib.rs (target/debug/deps/rs_broker_server-26ee3e97f55a55c7)

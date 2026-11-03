@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use rs_broker_core::dlq::{DlqHandler, DlqSelector};
+use rs_broker_core::features::dead_letter::{DlqHandler, DlqSelector};
 use rs_broker_proto::rsbroker::{
     rs_broker_server::RsBroker, BrokerMetrics, CancelMessageRequest, CancelMessageResponse,
     ComponentHealth, DeliverEvent, DlqMessageInfo, GetMessageStatusRequest,
@@ -794,7 +794,7 @@ impl RsBroker for RsBrokerService {
                             // Same unified MQTT-semantics matcher the gRPC
                             // callback fan-out uses, so both inbound delivery
                             // paths agree on what a subscriber receives.
-                            if rs_broker_core::matches_any(&event.topic, &patterns) {
+                            if rs_broker_core::shared::topic::matches_any(&event.topic, &patterns) {
                                 Some(Ok(event))
                             } else {
                                 None
@@ -1028,12 +1028,12 @@ impl RsBroker for RsBrokerService {
 
 /// Check if a topic matches any of the given patterns.
 ///
-/// Uses the unified MQTT-semantics matcher (`rs_broker_core::matches_any`),
+/// Uses the unified MQTT-semantics matcher (`rs_broker_core::shared::topic::matches_any`),
 /// same as the gRPC callback fan-out; see its module docs for the wildcard
 /// contract.
 #[cfg(test)]
 mod subscribe_events_filter {
-    use rs_broker_core::matches_any;
+    use rs_broker_core::shared::topic::matches_any;
 
     /// `*` as a full segment matches exactly one segment (MQTT), not a suffix.
     #[test]

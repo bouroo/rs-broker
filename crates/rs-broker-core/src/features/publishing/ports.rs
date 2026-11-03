@@ -19,6 +19,7 @@ pub enum OutboxError {
 }
 
 /// Port: durable storage for outbox messages.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait OutboxRepository: Send + Sync {
     /// Create a new outbox message

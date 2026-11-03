@@ -1,0 +1,780 @@
+$ cargo clippy --workspace --all-targets --offline -- -D warnings
+exit=101 duration=2.6s
+    Checking rs-broker-config v0.1.0 (/Users/ar687138/Documents/personal/bouroo/rs-broker/crates/rs-broker-config)
+   Compiling rs-broker-proto v0.1.0 (/Users/ar687138/Documents/personal/bouroo/rs-broker/crates/rs-broker-proto)
+    Checking rs-broker-core v0.1.0 (/Users/ar687138/Documents/personal/bouroo/rs-broker/crates/rs-broker-core)
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: `-D clippy::double-must-use` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::double_must_use)]`
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+25 | |
+26 | |     /// Get a message by ID
+27 | |     async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+...  |
+29 | |     /// Get message by topic and offset for deduplication
+30 | |     async fn get_by_topic_offset(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+...  |
+36 | |     /// Update message status
+37 | |     async fn update_status(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+...  |
+44 | |     /// Mark message as processed
+45 | |     async fn mark_processed(&self, id: Uuid) -> Result<(), InboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait InboxRepository: Send + Sync {
+23 | |     /// Create a new inbox message
+24 | |     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
+...  |
+47 | |     /// Delete a message
+48 | |     async fn delete(&self, id: Uuid) -> Result<(), InboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/consuming/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+25 | |
+26 | |     /// Get a DLQ message by ID
+27 | |     async fn get_by_id(&self, id: Uuid) -> Result<DlqMessage, DlqError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+...  |
+29 | |     /// Get all DLQ messages with optional filters
+30 | |     async fn get_all(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+...  |
+37 | |     /// Count DLQ messages
+38 | |     async fn count(&self, topic: Option<&str>) -> Result<i64, DlqError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+...  |
+40 | |     /// Delete a DLQ message
+41 | |     async fn delete(&self, id: Uuid) -> Result<(), DlqError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait DlqRepository: Send + Sync {
+23 | |     /// Create a new DLQ message
+24 | |     async fn create(&self, message: &DlqMessage) -> Result<(), DlqError>;
+...  |
+43 | |     /// Delete all DLQ messages
+44 | |     async fn delete_all(&self) -> Result<(), DlqError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/dead_letter/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/delivery/ports.rs:56:15
+   |
+56 |   #[async_trait]
+   |  _______________^
+57 | | pub trait SubscriberNotifier: Send + Sync {
+58 | |     /// Attempt delivery to `endpoint`. Implementations must bound the call's
+59 | |     /// duration; returning [`NotificationError::Timeout`] marks the attempt
+60 | |     /// timed out.
+61 | |     async fn notify(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/delivery/ports.rs:56:1
+   |
+56 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/delivery/ports.rs:56:1
+   |
+56 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+26 | |
+27 | |     /// Create multiple outbox messages in a batch
+28 | |     async fn create_batch(&self, messages: &[OutboxMessage]) -> Result<(), OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+30 | |     /// Get a message by ID
+31 | |     async fn get_by_id(&self, id: Uuid) -> Result<OutboxMessage, OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+33 | |     /// Get pending messages to publish
+34 | |     async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+43 | |     /// at-least-once; consumers dedup by `message_id`.
+44 | |     async fn claim_pending(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+54 | |     /// which may be published again.
+55 | |     async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+57 | |     /// Update message status
+58 | |     async fn update_status(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+67 | |     /// Returns the new retry count.
+68 | |     async fn increment_retry(
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+74 | |     /// Mark message as published
+75 | |     async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:15
+   |
+22 |   #[async_trait]
+   |  _______________^
+23 | | pub trait OutboxRepository: Send + Sync {
+24 | |     /// Create a new outbox message
+25 | |     async fn create(&self, message: &OutboxMessage) -> Result<(), OutboxError>;
+...  |
+77 | |     /// Delete a message
+78 | |     async fn delete(&self, id: Uuid) -> Result<(), OutboxError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/publishing/ports.rs:22:1
+   |
+22 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+25 | |
+26 | |     /// Get a subscriber by ID
+27 | |     async fn get_by_id(&self, id: Uuid) -> Result<Subscriber, SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+...  |
+29 | |     /// Get all active subscribers
+30 | |     async fn get_all_active(&self) -> Result<Vec<Subscriber>, SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+...  |
+32 | |     /// Update a subscriber
+33 | |     async fn update(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+...  |
+35 | |     /// Delete a subscriber
+36 | |     async fn delete(&self, id: Uuid) -> Result<(), SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this function has a `#[must_use]` attribute with no message, but returns a type already considered as `#[must_use]`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:15
+   |
+21 |   #[async_trait]
+   |  _______________^
+22 | | pub trait SubscriberRepository: Send + Sync {
+23 | |     /// Create a new subscriber
+24 | |     async fn create(&self, subscriber: &Subscriber) -> Result<(), SubscriberError>;
+...  |
+38 | |     /// Deactivate a subscriber
+39 | |     async fn deactivate(&self, id: Uuid) -> Result<(), SubscriberError>;
+   | |____^
+   |
+note: the return type is pinned boxed `futures::Future` trait object
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+help: remove `must_use`
+  --> crates/rs-broker-core/src/features/subscription/ports.rs:21:1
+   |
+21 | #[async_trait]
+   | ^^^^^^^^^^^^^^
+   = note: alternatively, you may add an explicit reason to the `must_use` attribute
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#double_must_use
+   = note: this error originates in the attribute macro `async_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: could not compile `rs-broker-core` (lib) due to 29 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `rs-broker-core` (lib test) due to 29 previous errors
