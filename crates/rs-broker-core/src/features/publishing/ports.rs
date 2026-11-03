@@ -33,6 +33,27 @@ pub trait OutboxRepository: Send + Sync {
     /// Get pending messages to publish
     async fn get_pending(&self, limit: i64) -> Result<Vec<OutboxMessage>, OutboxError>;
 
+    /// Atomically claim up to `limit` pending messages for publishing.
+    ///
+    /// Claimed messages flip to the `publishing` status, so concurrent
+    /// publishers — or replicas of one — observe disjoint sets. Rows abandoned
+    /// in `publishing` by a crashed publisher become claimable again once they
+    /// have not been touched for `lease_secs`, measured against the database
+    /// clock so app/server clock skew cannot cause double claims. Draining is
+    /// at-least-once; consumers dedup by `message_id`.
+    async fn claim_pending(
+        &self,
+        limit: i64,
+        lease_secs: i32,
+    ) -> Result<Vec<OutboxMessage>, OutboxError>;
+
+    /// Mark claimed messages as published in one round trip.
+    ///
+    /// Returns the number of rows actually marked; a count short of
+    /// `ids.len()` means another publisher re-claimed lease-expired rows,
+    /// which may be published again.
+    async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError>;
+
     /// Update message status
     async fn update_status(
         &self,
