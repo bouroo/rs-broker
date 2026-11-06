@@ -14,6 +14,11 @@
 # Kafka and Postgres run without limits on purpose: the benchmark measures
 # the broker, not the infrastructure.
 #
+# k6 runs inside the benchmark's own container network, so no request pays
+# a host-to-VM network hop and the benchmark publishes no host ports.
+# Set BENCH_K6_HOST=1 to run k6 on the host instead (it then needs the
+# broker's port published).
+#
 # Env overrides:
 #   RATES       space separated request rates to sweep (default "50 100 200 400")
 #   DURATION    test duration per rate        (default 30s)
@@ -50,7 +55,9 @@ RATES=${RATES:-"50 100 200 400"}
 DURATION=${DURATION:-30s}
 VUS=${VUS:-64}
 BATCH_SIZE=${BATCH_SIZE:-50}
-BROKER_URL=${BROKER_URL:-http://localhost:8080}
+# k6 runs inside the broker's container network by default, so this is a
+# service name, not a host address. Nothing is published on the host.
+BROKER_URL=${BROKER_URL:-http://rs-broker-producer:8080}
 SETTLE=${SETTLE:-20}
 DRAIN_WAIT=${DRAIN_WAIT:-180}
 RESULT_DIR=${RESULT_DIR:-$REPO_ROOT/bench/results}
@@ -59,9 +66,25 @@ COMPOSE=(docker compose -f compose.yml -f bench/compose.bench.yml)
 PROFILES=(--profile producer --profile consumer)
 ALL_CONTAINERS="rs-broker-producer rs-broker-consumer rs-broker-postgres rs-broker-kafka"
 
+# k6 runs inside the broker's container network by default: no request
+# pays a host-to-VM network hop, and the benchmark publishes no host
+# ports, so it cannot clash with another stack on the machine. Set
+# BENCH_K6_HOST=1 to run k6 on the host instead, which measures the hop.
+if [ "${BENCH_K6_HOST:-0}" = "1" ]; then
+  k6_run() { k6 run "$@"; }
+  K6_SCRIPT=bench/k6-publish.js
+  K6_RESULTS=$RESULT_DIR
+else
+  # The k6 image's entrypoint is already `k6`, so the arguments start with
+  # the subcommand.
+  k6_run() { "${COMPOSE[@]}" --profile bench run --rm -T bench-k6 run "$@"; }
+  K6_SCRIPT=/k6-publish.js
+  K6_RESULTS=/results
+fi
+
 cleanup() {
   if [ "${KEEP:-0}" != "1" ]; then
-    "${COMPOSE[@]}" "${PROFILES[@]}" down -v >/dev/null 2>&1 || true
+    "${COMPOSE[@]}" "${PROFILES[@]}" --profile bench down -v >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -116,24 +139,26 @@ printf '== scenario %s rates=[%s] duration=%s vus=%s ==\n' "$SCENARIO" "$RATES" 
 
 printf '== waiting for the producer to become healthy ==\n'
 for _ in $(seq 1 60); do
-  curl -sf "$BROKER_URL/health" >/dev/null 2>&1 && break
+  "${COMPOSE[@]}" --profile bench run --rm -T --entrypoint wget bench-k6 \
+    -q -O /dev/null "$BROKER_URL/health" >/dev/null 2>&1 && break
   sleep 2
 done
-curl -sf "$BROKER_URL/health" >/dev/null
+"${COMPOSE[@]}" --profile bench run --rm -T --entrypoint wget bench-k6 \
+  -q -O /dev/null "$BROKER_URL/health" >/dev/null
 
 # Warmup: a freshly started broker pays connection-pool, page-cache and
 # Kafka-metadata costs on its first requests. A low-rate warmup does not
 # remove them, so the warmup runs at the first measured rate and is
 # discarded.
 printf '== warmup ==\n'
-k6 run \
+k6_run \
   -e "SCENARIO=$SCENARIO" \
   -e "RATE=$(echo "$RATES" | awk '{print $1}')" \
   -e "DURATION=$DURATION" \
   -e "VUS=$VUS" \
   -e "BATCH_SIZE=$BATCH_SIZE" \
   -e "BROKER_URL=$BROKER_URL" \
-  bench/k6-publish.js > "$RESULT_DIR/k6-warmup.log" 2>&1 || true
+  "$K6_SCRIPT" > "$RESULT_DIR/k6-warmup.log" 2>&1 || true
 
 # The warmup leaves a backlog in the outbox. Drain it before measuring, or
 # the publisher is still working through warmup traffic while the measured
@@ -164,15 +189,15 @@ for RATE in $RATES; do
 
   printf '== k6 run rate=%s ==\n' "$RATE"
   set +e
-  k6 run \
-    --summary-export "$RESULT_DIR/k6-$TAG-summary.json" \
+  k6_run \
+    --summary-export "$K6_RESULTS/k6-$TAG-summary.json" \
     -e "SCENARIO=$SCENARIO" \
     -e "RATE=$RATE" \
     -e "DURATION=$DURATION" \
     -e "VUS=$VUS" \
     -e "BATCH_SIZE=$BATCH_SIZE" \
     -e "BROKER_URL=$BROKER_URL" \
-    bench/k6-publish.js > "$RESULT_DIR/k6-$TAG.log" 2>&1
+    "$K6_SCRIPT" > "$RESULT_DIR/k6-$TAG.log" 2>&1
   STATUS=$?
   set -e
   tail -6 "$RESULT_DIR/k6-$TAG.log"
