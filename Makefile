@@ -161,9 +161,9 @@ bench-server:
 	cargo bench --package rs-broker-server
 
 # k6 load benchmark under constrained container resources.
-# Tier: 50m-64m | 100m-128m. Scenario: single | batch.
+# Tier: 100m-64m | 200m-128m. Scenario: single | batch.
 bench-k6:
-	@./bench/run.sh $(or $(TIER),50m-64m) $(or $(SCENARIO),single)
+	@./bench/run.sh $(or $(TIER),100m-64m) $(or $(SCENARIO),single)
 
 .PHONY: bench-k6
 

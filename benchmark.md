@@ -36,12 +36,34 @@ and `64Mi`/`128Mi`, applied as cgroup v2 quota and limit via `cpus:` and
 `mem_limit:` in [`bench/compose.bench.yml`](bench/compose.bench.yml).
 
 Kafka and Postgres are deliberately **unlimited** so the numbers describe the
-broker, not the infrastructure. Postgres used at most 0.59 cores and Kafka at
-most 0.19, so neither was anywhere near saturation.
+broker, not the infrastructure. Postgres used at most 1.22 cores and Kafka at
+most 0.14, so neither was anywhere near saturation.
 
 Producer and consumer run as separate containers with separate limits. The
 producer has no consumer topics configured, so it does not compete with the
 consumer for the same consumer group.
+
+### Everything runs in one network
+
+k6, the broker, Postgres and Kafka all sit on the same container network.
+The benchmark **publishes no host ports at all**:
+
+- the broker's 8080 would otherwise clash with any other stack on the
+  machine (the consumer's 8081 clashes with schema-registry in the default
+  compose file);
+- every request skips the host-to-VM NAT hop, which is worth more than the
+  broker's own per-request cost.
+
+The cost of that hop, measured at 200 req/s on the 100m tier with the same
+broker and the same rate:
+
+| Load generator | avg | p95 | p99 |
+|---|---|---|---|
+| k6 on the host, through a published port | 1.54 ms | 2.22 ms | 3.66 ms |
+| k6 in the broker's network | **0.87 ms** | **1.24 ms** | **2.45 ms** |
+
+The hop cost ~0.67 ms per request: roughly 44% of the measured latency at
+that rate. Every number below is the in-network figure.
 
 ### Environment
 
@@ -49,12 +71,12 @@ consumer for the same consumer group.
 |---|---|
 | Host | macOS 27.2, arm64, 14 cores / 48 GiB |
 | Containers | Podman 6.0.2 machine, 4 vCPU / 4 GiB, cgroup v2 |
-| Load generator | k6 v2.3.0, on the host, outside the VM |
-| rs-broker | this branch, `--release`, postgres feature |
+| Load generator | k6 v2.3.0, in the broker's container network |
+| rs-broker | v0.3.0, `--release`, postgres feature |
 
-The load generator shares the same physical host as the containers, so
-absolute latency includes host networking. The *relative* numbers (100m vs
-200m, rate vs rate) are unaffected by that.
+k6 shares the VM's 4 vCPUs with the broker, Postgres and Kafka. Postgres
+peaked at 1.22 cores and Kafka at 0.14, so the infrastructure was never the
+constraint, but it was not isolated either.
 
 ## Method
 
@@ -99,11 +121,11 @@ Each request publishes one message.
 
 | Target rate | Achieved | Reqs | p95 | p99 | Producer cores | Consumer cores | Peak mem (P/C) |
 |---|---|---|---|---|---|---|---|
-| 100/s | 100.0/s | 3 000 | 3.4 ms | 4.6 ms | 0.038 | 0.016 | 5.3 / 4.3 MiB |
-| 200/s | 200.0/s | 6 000 | 2.2 ms | 3.2 ms | 0.058 | 0.018 | 5.5 / 5.5 MiB |
-| 400/s | 400.0/s | 12 001 | 1.6 ms | 2.9 ms | 0.083 | 0.019 | 8.4 / 7.7 MiB |
-| 800/s | 796.0/s | 23 896 | 36 ms | 130 ms | 0.101 | 0.029 | 8.5 / 13.0 MiB |
-| 1 200/s | 1 140.4/s | 34 418 | 227 ms | 244 ms | 0.102 | 0.034 | 8.5 / 13.0 MiB |
+| 100/s | 100.0/s | 3 001 | 2.0 ms | 3.5 ms | 0.036 | 0.018 | 6.0 / 4.5 MiB |
+| 200/s | 200.0/s | 6 001 | 1.2 ms | 2.0 ms | 0.049 | 0.019 | 6.2 / 5.3 MiB |
+| 400/s | 400.0/s | 12 001 | 0.9 ms | 2.1 ms | 0.072 | 0.020 | 7.8 / 6.8 MiB |
+| 800/s | 797.5/s | 23 927 | 18 ms | 53 ms | 0.100 | 0.025 | 13.5 / 10.9 MiB |
+| 1 200/s | 1 133.9/s | 34 162 | 232 ms | 250 ms | 0.102 | 0.037 | 21.6 / 17.5 MiB |
 
 The 100 m ceiling is **~1 140 req/s**. Past it the offered rate is dropped
 and latency jumps by two orders of magnitude. The producer burns exactly its
@@ -113,18 +135,18 @@ and latency jumps by two orders of magnitude. The producer burns exactly its
 
 | Target rate | Achieved | Reqs | p95 | p99 | Producer cores | Consumer cores | Peak mem (P/C) |
 |---|---|---|---|---|---|---|---|
-| 200/s | 200.0/s | 6 001 | 2.0 ms | 3.2 ms | 0.052 | 0.018 | 6.5 / 4.6 MiB |
-| 400/s | 400.0/s | 12 001 | 1.5 ms | 2.8 ms | 0.079 | 0.020 | 7.3 / 7.3 MiB |
-| 800/s | 800.0/s | 24 001 | 1.3 ms | 2.8 ms | 0.119 | 0.025 | 8.9 / 12.6 MiB |
-| 1 600/s | 1 599.9/s | 47 998 | 11 ms | 25 ms | 0.200 | 0.042 | 10.3 / 23.1 MiB |
-| 2 400/s | 2 227.6/s | 67 086 | 242 ms | 262 ms | 0.203 | 0.041 | 10.3 / 23.1 MiB |
+| 200/s | 200.0/s | 6 001 | 1.3 ms | 3.1 ms | 0.049 | 0.017 | 9.6 / 5.3 MiB |
+| 400/s | 400.0/s | 12 001 | 0.9 ms | 2.1 ms | 0.071 | 0.019 | 10.7 / 6.6 MiB |
+| 800/s | 800.0/s | 24 001 | 2.0 ms | 12 ms | 0.136 | 0.028 | 14.1 / 9.5 MiB |
+| 1 600/s | 1 600.0/s | 48 001 | 3.9 ms | 16 ms | 0.197 | 0.043 | 19.7 / 15.7 MiB |
+| 2 400/s | 2 389.0/s | 71 740 | 69 ms | 88 ms | 0.201 | 0.051 | 32.4 / 24.7 MiB |
 
-The 200 m ceiling is **~2 230 req/s**, 2.0x the 100 m ceiling — the same
+The 200 m ceiling is **~2 390 req/s**, 2.1x the 100 m ceiling — the same
 ratio as the CPU allowance.
 
-At 800/s the broker is comfortable: p95 1.3 ms with the producer at 60% of
-its quota. At 1 600/s the quota is fully used and p95 rises to 11 ms, but the
-rate is still delivered exactly.
+At 1 600/s the broker is still comfortable: p95 3.9 ms with the producer at
+98% of its quota, and the full rate delivered exactly. The cliff comes at
+2 400/s.
 
 ## Results — batch publish (50 messages per request)
 
@@ -140,36 +162,36 @@ publishes afterwards. **Nothing is dead-lettered: `fail` is 0 in every row.**
 
 | Target rate | Achieved | msgs | pub | fail | p95 | p99 | Producer cores | Consumer cores |
 |---|---|---|---|---|---|---|---|---|
-| 10/s | 10.0/s | 15 000 | 15 000 | 0 | 11.7 ms | 13.6 ms | 0.030 | 0.022 |
-| 20/s | 20.0/s | 30 050 | 30 050 | 0 | 5.1 ms | 6.3 ms | 0.039 | 0.029 |
-| 40/s | 40.0/s | 60 000 | 60 000 | 0 | 4.6 ms | 9.9 ms | 0.049 | 0.059 |
-| 80/s | 80.0/s | 120 050 | 79 950 | 0 | 35 ms | 55 ms | 0.091 | 0.042 |
-| 120/s | 120.0/s | 180 000 | 0 | 0 | 57 ms | 83 ms | 0.106 | 0.082 |
+| 10/s | 10.0/s | 15 000 | 15 000 | 0 | 6.1 ms | 7.5 ms | 0.015 | 0.026 |
+| 20/s | 20.0/s | 30 050 | 30 050 | 0 | 4.4 ms | 5.3 ms | 0.024 | 0.042 |
+| 40/s | 40.0/s | 60 000 | 60 000 | 0 | 3.5 ms | 7.9 ms | 0.046 | 0.056 |
+| 80/s | 80.0/s | 120 050 | 79 950 | 0 | 3.6 ms | 8.5 ms | 0.068 | 0.084 |
+| 120/s | 120.0/s | 180 050 | 0 | 0 | 75 ms | 175 ms | 0.105 | 0.085 |
 
 ### 200m CPU / 128 MiB
 
 | Target rate | Achieved | msgs | pub | fail | p95 | p99 | Producer cores | Consumer cores |
 |---|---|---|---|---|---|---|---|---|
-| 10/s | 10.0/s | 15 050 | 15 050 | 0 | 6.0 ms | 7.3 ms | 0.014 | 0.029 |
-| 20/s | 20.0/s | 30 000 | 30 000 | 0 | 5.4 ms | 10.1 ms | 0.029 | 0.040 |
-| 40/s | 40.0/s | 60 050 | 60 050 | 0 | 4.0 ms | 7.4 ms | 0.046 | 0.056 |
-| 80/s | 80.0/s | 120 000 | 79 850 | 0 | 4.1 ms | 7.7 ms | 0.069 | 0.068 |
-| 120/s | 120.0/s | 180 000 | 0 | 0 | 15 ms | 33 ms | 0.124 | 0.043 |
-| 160/s | 160.0/s | 240 050 | 0 | 0 | 7.3 ms | 42 ms | 0.186 | 0.083 |
+| 10/s | 10.0/s | 15 000 | 15 000 | 0 | 6.5 ms | 8.7 ms | 0.025 | 0.018 |
+| 20/s | 20.0/s | 30 050 | 30 050 | 0 | 3.5 ms | 5.6 ms | 0.031 | 0.039 |
+| 40/s | 40.0/s | 60 050 | 60 050 | 0 | 3.8 ms | 9.2 ms | 0.045 | 0.056 |
+| 80/s | 80.0/s | 120 050 | 79 900 | 0 | 3.5 ms | 7.9 ms | 0.069 | 0.053 |
+| 120/s | 120.0/s | 180 050 | 0 | 0 | 5.2 ms | 136 ms | 0.174 | 0.092 |
+| 160/s | 160.0/s | 240 050 | 0 | 0 | 5.4 ms | 15 ms | 0.191 | 0.087 |
 
 Batch publish is the better deal: at 200m / 128 MiB, 80 requests/s of 50
-messages each is **4 000 messages/s** at p95 4.1 ms — nearly twice the
-single-publish ceiling of ~2 230/s, because the per-request overhead
+messages each is **4 000 messages/s** at p95 3.5 ms — comfortably above the
+single-publish ceiling of ~2 390/s, because the per-request overhead
 (Postgres round trip, HTTP framing, Kafka produce) is amortised over 50
 messages.
 
 ## Where the limit comes from
 
-The broker is not slow per request: median latency is 1.6-2.2 ms up to
-400 req/s on the 100 m tier and 1.3-2.0 ms up to 800 req/s on the 200 m tier.
-Past the ceiling the failure mode is a **stall**, not a slowdown — at
-1 200 req/s on 100 m the p95 jumps to 227 ms, because every in-flight request
-waits out the same throttle period.
+The broker is not slow per request: p95 is 0.9-2.0 ms up to 400 req/s on the
+100 m tier and 0.9-2.0 ms up to 1 600 req/s on the 200 m tier. Past the
+ceiling the failure mode is a **stall**, not a slowdown — at 1 200 req/s on
+100 m the p95 jumps to 232 ms, because every in-flight request waits out the
+same throttle period.
 
 Evidence from the cgroup counters, at 50 m CPU during a 180 s run:
 
@@ -233,14 +255,16 @@ from a duplicate `server.publisher_*` pair instead of the documented
 
 | Tier | Scenario | Max sustained | Equivalent messages/s |
 |---|---|---|---|
-| 100m / 64 MiB | single | ~1 140 req/s | ~1 140 |
+| 100m / 64 MiB | single | ~1 135 req/s | ~1 135 |
 | 100m / 64 MiB | batch (50) | 80 req/s | 4 000 |
-| 200m / 128 MiB | single | ~2 230 req/s | ~2 230 |
+| 200m / 128 MiB | single | ~2 390 req/s | ~2 390 |
 | 200m / 128 MiB | batch (50) | 80 req/s | 4 000 |
 
 ## Reproducing
 
-Requires Docker (or Podman) with the Compose plugin, `k6`, and `jq`.
+Requires Docker (or Podman) with the Compose plugin and `jq`. k6 runs
+inside the benchmark's own container network, so it does not need to be
+installed on the host.
 
 ```bash
 # One tier, one scenario. RATES defaults to "50 100 200 400".
@@ -263,14 +287,11 @@ running for inspection.
 
 ## Caveats
 
-- The load generator ran on the host while the containers ran in a Podman
-  VM, so absolute latency includes a host network hop. Compare tiers, not
-  absolute numbers. For reference, nginx serving a static file over the same
-  path cost 109 µs/request of broker-visible CPU versus rs-broker's 98.5 µs,
-  so the per-request floor is the environment, not the broker.
-- The host VM has 4 vCPUs; both broker containers plus Postgres and Kafka
-  share them. Postgres peaked at 0.59 cores and Kafka at 0.19, so the
-  infrastructure was not the constraint, but it was not isolated either.
+- k6, the broker, Postgres and Kafka share the VM's 4 vCPUs. Postgres
+  peaked at 1.22 cores and Kafka at 0.14, so the infrastructure was never
+  the constraint, but it was not isolated either. A host-side load
+  generator would have removed that coupling at the cost of a network hop
+  worth ~0.67 ms per request.
 - Only the REST API was measured. k6 v2.3.0 has no gRPC or SSE module, so
   the gRPC path is unmeasured. It shares the same service implementation as
   the REST path, so the ceiling should be comparable.
