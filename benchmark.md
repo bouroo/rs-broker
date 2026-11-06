@@ -165,8 +165,8 @@ messages.
 
 ## Where the limit comes from
 
-The broker is not slow per request: median latency is 1.6–2.2 ms up to
-400 req/s on the 100 m tier and 1.3–2.0 ms up to 800 req/s on the 200 m tier.
+The broker is not slow per request: median latency is 1.6-2.2 ms up to
+400 req/s on the 100 m tier and 1.3-2.0 ms up to 800 req/s on the 200 m tier.
 Past the ceiling the failure mode is a **stall**, not a slowdown — at
 1 200 req/s on 100 m the p95 jumps to 227 ms, because every in-flight request
 waits out the same throttle period.
@@ -185,9 +185,9 @@ Confirming the causal chain:
 
 | Configuration | Requests | Over 50 ms | Max |
 |---|---|---|---|
-| 50m CPU limit, 6 runs of 90–180 s | 9 001 each | 16–95 | 173–1 740 ms |
-| 1 core (no quota), 2 runs of 180 s | 9 001 each | **0** | 17–23 ms |
-| 50m CPU, publisher interval 100 → 5 000 ms, 3 runs of 90 s | 4 500 each | 0–6 | 30–102 ms |
+| 50m CPU limit, 6 runs of 90-180 s | 9 001 each | 16-95 | 173-1 740 ms |
+| 1 core (no quota), 2 runs of 180 s | 9 001 each | **0** | 17-23 ms |
+| 50m CPU, publisher interval 100 -> 5 000 ms, 3 runs of 90 s | 4 500 each | 0-6 | 30-102 ms |
 
 The quota is the cause: every run under a 50 m limit stalled, and no run
 without a quota stalled at all.
@@ -196,7 +196,7 @@ The mechanism is CFS bandwidth throttling. The publisher drains up to 100
 outbox rows every 100 ms; on a 0.05-core quota that burst cannot fit in the
 period budget, so the cgroup is throttled mid-drain and the request path
 stalls with it. Spreading the same work over 5 s shrinks the burst and
-reduces the stalls (0–6 slow requests instead of 16–95), but does not
+reduces the stalls (0-6 slow requests instead of 16-95), but does not
 eliminate them — the quota itself is still the binding constraint.
 
 The practical finding: **on small CPU quotas, the publisher's cadence has to

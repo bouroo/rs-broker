@@ -219,7 +219,7 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_RETRY__INITIAL_DELAY_MS` | `1000` | Initial delay in ms |
 | `RS_BROKER_RETRY__MULTIPLIER` | `2.0` | Exponential backoff multiplier |
 | `RS_BROKER_RETRY__MAX_DELAY_MS` | `60000` | Maximum delay in ms |
-| `RS_BROKER_RETRY__JITTER_FACTOR` | `0.1` | Jitter factor (0.0–1.0) |
+| `RS_BROKER_RETRY__JITTER_FACTOR` | `0.1` | Jitter factor (0.0-1.0) |
 
 ### Outbox Publisher
 
