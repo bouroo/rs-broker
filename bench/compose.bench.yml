@@ -4,9 +4,9 @@
 #   docker compose -f compose.yml -f bench/compose.bench.yml --profile producer --profile consumer up -d
 #
 # What it changes:
-#   - Kafka and Postgres lose their host port mappings: the benchmark drives
-#     the broker over HTTP only, and freeing 5432/9092 avoids clashes with
-#     other stacks on the host.
+#   - Every service loses its host port mapping: k6, the broker, Postgres
+#     and Kafka all talk over the compose network, so no request pays a
+#     host-to-VM hop and the benchmark cannot clash with another stack.
 #   - The `both`-mode service is disabled so only the separately limited
 #     producer and consumer run.
 #   - The producer stops consuming (no consumer topics), so the two
@@ -36,6 +36,9 @@ services:
       target: development
     cpus: ${BENCH_CPU:-0.1}
     mem_limit: ${BENCH_MEM:-64m}
+    # No host port: k6 runs inside this network, and publishing 8080
+    # would clash with any other stack on the host.
+    ports: !reset []
     environment:
       RS_BROKER_KAFKA__CONSUMER__TOPICS: ""
       # Publisher cadence. A large batch on a small CPU quota bursts past
@@ -52,7 +55,21 @@ services:
       target: development
     cpus: ${BENCH_CPU:-0.1}
     mem_limit: ${BENCH_MEM:-64m}
+    # No host port, for the same reason as the producer.
+    ports: !reset []
     environment:
       # One topic only: the benchmark publishes to `orders`, and subscribing
       # to topics that do not exist floods the log with UnknownTopicOrPartition.
       RS_BROKER_KAFKA__CONSUMER__TOPICS: orders
+
+  # k6 runs inside the broker's network. Two reasons: no request pays a
+  # host-to-VM network hop, and the benchmark publishes no host ports, so
+  # it cannot clash with another stack on the machine.
+  bench-k6:
+    image: grafana/k6:latest
+    profiles: ["bench"]
+    volumes:
+      - ./bench/k6-publish.js:/k6-publish.js:ro
+      - ./bench/results:/results
+    networks:
+      - backend
