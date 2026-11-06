@@ -3,7 +3,7 @@
 [![Build](https://github.com/bouroo/rs-broker/actions/workflows/rust.yml/badge.svg)](https://github.com/bouroo/rs-broker/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://rustup.rs/)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-0.3.1-blue)](Cargo.toml)
 [![Contributors](https://img.shields.io/github/contributors/bouroo/rs-broker)](https://github.com/bouroo/rs-broker/graphs/contributors)
 [![Stars](https://img.shields.io/github/stars/bouroo/rs-broker?style=flat)](https://github.com/bouroo/rs-broker)
 
