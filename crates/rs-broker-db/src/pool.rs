@@ -30,28 +30,36 @@ pub type DbPool = MySqlPool;
 #[cfg(all(feature = "postgres", not(feature = "mysql")))]
 pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
     let url = config.connection_url();
-    let pool = PgPoolOptions::new()
+    let mut options = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(Duration::from_secs(config.connection_timeout))
-        .max_lifetime(Duration::from_secs(config.max_lifetime))
-        .connect(&url)
-        .await?;
+        .max_lifetime(Duration::from_secs(config.max_lifetime));
 
-    Ok(pool)
+    // `min_idle_connections` was configurable but never applied, so the pool
+    // always started empty and grew to whatever concurrency demanded. On a
+    // small CPU quota that means connections are opened under load, when
+    // they cost the most.
+    if let Some(min_idle) = config.min_idle_connections {
+        options = options.min_connections(min_idle);
+    }
+
+    Ok(options.connect(&url).await?)
 }
 
 /// Create a database connection pool for MariaDB
 #[cfg(all(feature = "mysql", not(feature = "postgres")))]
 pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, PoolError> {
     let url = config.connection_url();
-    let pool = MySqlPoolOptions::new()
+    let mut options = MySqlPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(Duration::from_secs(config.connection_timeout))
-        .max_lifetime(Duration::from_secs(config.max_lifetime))
-        .connect(&url)
-        .await?;
+        .max_lifetime(Duration::from_secs(config.max_lifetime));
 
-    Ok(pool)
+    if let Some(min_idle) = config.min_idle_connections {
+        options = options.min_connections(min_idle);
+    }
+
+    Ok(options.connect(&url).await?)
 }
 
 #[cfg(not(any(feature = "postgres", feature = "mysql")))]

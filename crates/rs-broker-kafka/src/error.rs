@@ -14,6 +14,11 @@ pub enum KafkaError {
     #[error("Producer error: {0}")]
     Producer(String),
 
+    /// The producer's local queue is full: the broker is applying
+    /// backpressure, not rejecting the message.
+    #[error("Producer queue full: {0}")]
+    ProducerQueueFull(String),
+
     #[error("Consumer error: {0}")]
     Consumer(String),
 

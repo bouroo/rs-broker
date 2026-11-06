@@ -24,6 +24,13 @@ pub trait InboxRepository: Send + Sync {
     /// Create a new inbox message
     async fn create(&self, message: &InboxMessage) -> Result<(), InboxError>;
 
+    /// Store a batch of inbox messages in one round trip.
+    ///
+    /// One `INSERT` per message makes the consumer's cost per message
+    /// dominated by database round trips; batching keeps the same
+    /// per-message rows but pays the trip once per batch.
+    async fn create_batch(&self, messages: &[InboxMessage]) -> Result<(), InboxError>;
+
     /// Get a message by ID
     async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError>;
 

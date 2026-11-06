@@ -33,6 +33,20 @@ impl InboxManager {
         Ok(message.id)
     }
 
+    /// Store a batch of messages in the inbox with one round trip.
+    ///
+    /// The consumer receives messages in bursts; storing them one at a time
+    /// makes each message cost a database round trip.
+    pub async fn store_messages(&self, messages: Vec<InboxMessage>) -> Result<Vec<Uuid>> {
+        if messages.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids = messages.iter().map(|m| m.id).collect();
+        self.repository.create_batch(&messages).await?;
+
+        Ok(ids)
+    }
     /// Get a message by ID
     pub async fn get_message(&self, id: Uuid) -> Result<InboxMessage> {
         Ok(self.repository.get_by_id(id).await?)

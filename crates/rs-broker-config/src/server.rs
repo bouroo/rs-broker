@@ -41,14 +41,6 @@ pub struct ServerConfig {
     /// Request timeout in seconds.
     #[serde(default = "default_request_timeout_secs")]
     pub request_timeout_secs: u64,
-
-    /// Number of outbox messages fetched per publisher tick.
-    #[serde(default = "default_publisher_batch_size")]
-    pub publisher_batch_size: i64,
-
-    /// Milliseconds between publisher ticks.
-    #[serde(default = "default_publisher_interval_ms")]
-    pub publisher_interval_ms: u64,
 }
 
 fn default_host() -> String {
@@ -71,14 +63,6 @@ fn default_request_timeout_secs() -> u64 {
     30
 }
 
-fn default_publisher_batch_size() -> i64 {
-    100
-}
-
-fn default_publisher_interval_ms() -> u64 {
-    100
-}
-
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -88,8 +72,6 @@ impl Default for ServerConfig {
             grpc_port: default_grpc_port(),
             shutdown_timeout_secs: default_shutdown_timeout_secs(),
             request_timeout_secs: default_request_timeout_secs(),
-            publisher_batch_size: default_publisher_batch_size(),
-            publisher_interval_ms: default_publisher_interval_ms(),
         }
     }
 }

@@ -17,7 +17,17 @@ pub fn create_producer_config(config: &AppKafkaConfig) -> ClientConfig {
             "request.timeout.ms",
             config.producer.request_timeout_ms.to_string(),
         )
-        .set("message.timeout.ms", "30000");
+        .set(
+            "message.timeout.ms",
+            config.producer.message_timeout_ms.to_string(),
+        )
+        // Idempotence and compression were configurable but never passed to
+        // librdkafka, so both silently stayed at their defaults.
+        .set(
+            "enable.idempotence",
+            config.producer.enable_idempotence.to_string(),
+        )
+        .set("compression.type", &config.producer.compression_type);
 
     client_config
 }
