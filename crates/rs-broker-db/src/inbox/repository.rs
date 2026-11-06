@@ -56,6 +56,91 @@ impl InboxRepository for SqlxInboxRepository {
         Ok(())
     }
 
+    /// Store a batch of inbox messages with a single round trip.
+    ///
+    /// The consumer's per-message cost was dominated by one database round
+    /// trip per message; this pushes every column as a Postgres array and
+    /// unnests it, so a batch costs one statement.
+    async fn create_batch(&self, messages: &[InboxMessage]) -> Result<(), InboxError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        let mut ids = Vec::with_capacity(messages.len());
+        let mut topics = Vec::with_capacity(messages.len());
+        let mut partitions = Vec::with_capacity(messages.len());
+        let mut offsets = Vec::with_capacity(messages.len());
+        let mut keys = Vec::with_capacity(messages.len());
+        let mut event_types = Vec::with_capacity(messages.len());
+        let mut payloads = Vec::with_capacity(messages.len());
+        let mut headers = Vec::with_capacity(messages.len());
+        let mut timestamps = Vec::with_capacity(messages.len());
+        let mut statuses = Vec::with_capacity(messages.len());
+        let mut attempt_counts = Vec::with_capacity(messages.len());
+        let mut error_messages = Vec::with_capacity(messages.len());
+        let mut received_at = Vec::with_capacity(messages.len());
+        let mut processed_at = Vec::with_capacity(messages.len());
+
+        for message in messages {
+            ids.push(message.id);
+            topics.push(message.topic.clone());
+            partitions.push(message.partition);
+            offsets.push(message.offset);
+            keys.push(message.key.clone());
+            event_types.push(message.event_type.clone());
+            payloads.push(message.payload.clone());
+            headers.push(message.headers.clone());
+            timestamps.push(message.timestamp);
+            statuses.push(message.status.to_string());
+            attempt_counts.push(message.attempt_count);
+            error_messages.push(message.error_message.clone());
+            received_at.push(message.received_at);
+            processed_at.push(message.processed_at);
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO inbox_messages (
+                id, message_id, topic, partition, "offset", key, event_type,
+                payload, headers, timestamp, status,
+                attempt_count, error_message, received_at, processed_at
+            )
+            SELECT
+                id, id, topic, partition, "offset", key, event_type,
+                payload, headers, timestamp, status,
+                attempt_count, error_message, received_at, processed_at
+            FROM UNNEST(
+                $1::uuid[], $2::text[], $3::int[], $4::bigint[],
+                $5::text[], $6::text[], $7::jsonb[], $8::jsonb[],
+                $9::timestamptz[], $10::text[], $11::int[], $12::text[],
+                $13::timestamptz[], $14::timestamptz[]
+            ) AS batch(
+                id, topic, partition, "offset", key, event_type,
+                payload, headers, timestamp, status,
+                attempt_count, error_message, received_at, processed_at
+            )
+            "#,
+        )
+        .bind(ids)
+        .bind(topics)
+        .bind(partitions)
+        .bind(offsets)
+        .bind(keys)
+        .bind(event_types)
+        .bind(payloads)
+        .bind(headers)
+        .bind(timestamps)
+        .bind(statuses)
+        .bind(attempt_counts)
+        .bind(error_messages)
+        .bind(received_at)
+        .bind(processed_at)
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
+
+        Ok(())
+    }
     async fn get_by_id(&self, id: Uuid) -> Result<InboxMessage, InboxError> {
         let row =
             sqlx::query_as::<_, InboxMessageRow>("SELECT * FROM inbox_messages WHERE id = $1")
@@ -157,6 +242,56 @@ impl InboxRepository for SqlxInboxRepository {
         .await
         .map_err(storage)?;
 
+        Ok(())
+    }
+
+    /// Store a batch of inbox messages with a single round trip.
+    ///
+    /// MySQL has no `UNNEST`, so the rows are written with one multi-row
+    /// `INSERT` instead of one statement per message.
+    async fn create_batch(&self, messages: &[InboxMessage]) -> Result<(), InboxError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        // Multi-row INSERT: 15 columns per row, chunked to stay well under
+        // the prepared-statement parameter limit.
+        const MAX_ROWS: usize = 100;
+
+        for chunk in messages.chunks(MAX_ROWS) {
+            let mut sql = String::from(
+                "INSERT INTO inbox_messages (id, message_id, topic, partition, `offset`, key, \
+                 event_type, payload, headers, timestamp, status, attempt_count, error_message, \
+                 received_at, processed_at) VALUES ",
+            );
+            for (i, _) in chunk.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            }
+
+            let mut query = sqlx::query(&sql);
+            for message in chunk {
+                query = query
+                    .bind(message.id)
+                    .bind(message.id)
+                    .bind(&message.topic)
+                    .bind(message.partition)
+                    .bind(message.offset)
+                    .bind(&message.key)
+                    .bind(&message.event_type)
+                    .bind(&message.payload)
+                    .bind(&message.headers)
+                    .bind(message.timestamp)
+                    .bind(message.status.to_string())
+                    .bind(message.attempt_count)
+                    .bind(&message.error_message)
+                    .bind(message.received_at)
+                    .bind(message.processed_at);
+            }
+
+            query.execute(&self.pool).await.map_err(storage)?;
+        }
         Ok(())
     }
 

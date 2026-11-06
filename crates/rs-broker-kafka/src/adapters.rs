@@ -5,6 +5,7 @@
 
 use rs_broker_core::features::publishing::ports::{MessageSink, OutboundMessage, SinkError};
 
+use crate::error::KafkaError;
 use crate::producer::client::ProducerMessage;
 use crate::KafkaProducer;
 
@@ -32,8 +33,10 @@ impl MessageSink for KafkaMessageSink {
             headers: None,
         };
 
-        self.producer
-            .send(record)
-            .map_err(|e| SinkError::Transport(e.to_string()))
+        match self.producer.send(record) {
+            Ok(()) => Ok(()),
+            Err(KafkaError::ProducerQueueFull(text)) => Err(SinkError::Backpressure(text)),
+            Err(e) => Err(SinkError::Transport(e.to_string())),
+        }
     }
 }

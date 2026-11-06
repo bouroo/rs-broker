@@ -89,6 +89,16 @@ impl OutboxRepository for MockOutboxRepository {
         Ok(marked)
     }
 
+    async fn release_claim(&self, id: Uuid) -> Result<(), OutboxError> {
+        let mut guard = self.messages.lock().unwrap();
+        if let Some(msg) = guard.get_mut(&id) {
+            msg.status = MessageStatus::Pending;
+            Ok(())
+        } else {
+            Err(OutboxError::NotFound(id))
+        }
+    }
+
     async fn increment_retry(
         &self,
         id: Uuid,

@@ -1,0 +1,58 @@
+# Benchmark overlay for rs-broker.
+#
+# Applied on top of compose.yml:
+#   docker compose -f compose.yml -f bench/compose.bench.yml --profile producer --profile consumer up -d
+#
+# What it changes:
+#   - Kafka and Postgres lose their host port mappings: the benchmark drives
+#     the broker over HTTP only, and freeing 5432/9092 avoids clashes with
+#     other stacks on the host.
+#   - The `both`-mode service is disabled so only the separately limited
+#     producer and consumer run.
+#   - The producer stops consuming (no consumer topics), so the two
+#     containers do not compete for the same consumer group.
+#   - Producer and consumer get CPU and memory limits. The values come from
+#       BENCH_CPU  cores as a decimal, 0.1 = 100 millicores (k8s "100m")
+#       BENCH_MEM  memory limit, 64m = 64 MiB
+#
+# Kafka and Postgres stay unlimited: the point of the benchmark is how far a
+# constrained broker gets while the infrastructure is not the bottleneck.
+
+services:
+  postgres:
+    ports: !reset []
+
+  kafka:
+    ports: !reset []
+
+  rs-broker:
+    profiles: ["bench-disabled"]
+
+  rs-broker-producer:
+    image: rs-broker:bench
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: development
+    cpus: ${BENCH_CPU:-0.1}
+    mem_limit: ${BENCH_MEM:-64m}
+    environment:
+      RS_BROKER_KAFKA__CONSUMER__TOPICS: ""
+      # Publisher cadence. A large batch on a small CPU quota bursts past
+      # the CFS period budget and throttles the whole cgroup; the knobs are
+      # exposed so the effect can be measured.
+      RS_BROKER_OUTBOX__BATCH_SIZE: ${BENCH_PUBLISHER_BATCH:-100}
+      RS_BROKER_OUTBOX__POLL_INTERVAL_MS: ${BENCH_PUBLISHER_INTERVAL:-100}
+
+  rs-broker-consumer:
+    image: rs-broker:bench
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: development
+    cpus: ${BENCH_CPU:-0.1}
+    mem_limit: ${BENCH_MEM:-64m}
+    environment:
+      # One topic only: the benchmark publishes to `orders`, and subscribing
+      # to topics that do not exist floods the log with UnknownTopicOrPartition.
+      RS_BROKER_KAFKA__CONSUMER__TOPICS: orders

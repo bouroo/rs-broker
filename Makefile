@@ -160,5 +160,12 @@ bench-server:
 	@echo "Running rs-broker-server benchmarks..."
 	cargo bench --package rs-broker-server
 
+# k6 load benchmark under constrained container resources.
+# Tier: 50m-64m | 100m-128m. Scenario: single | batch.
+bench-k6:
+	@./bench/run.sh $(or $(TIER),50m-64m) $(or $(SCENARIO),single)
+
+.PHONY: bench-k6
+
 # Alias target
 bench: bench-all

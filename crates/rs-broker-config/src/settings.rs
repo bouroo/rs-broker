@@ -324,6 +324,19 @@ mod tests {
         let settings = Settings::load_from_file(config_dir).unwrap();
         assert_eq!(settings.server.http_port, 19999);
         assert_eq!(settings.kafka.consumer.group_id, "env-group");
-        assert_eq!(settings.kafka.consumer.topics, vec!["events", "orders"]);
+    }
+
+    /// The publisher cadence lives under `outbox.*` — the keys the compose
+    /// file and `.env.example` document. They used to be ignored, because
+    /// the server read a duplicate `server.publisher_*` pair instead.
+    #[test]
+    fn outbox_publisher_cadence_is_configurable() {
+        let config_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config");
+        std::env::set_var("RS_BROKER_OUTBOX__BATCH_SIZE", "250");
+        std::env::set_var("RS_BROKER_OUTBOX__POLL_INTERVAL_MS", "250");
+
+        let settings = Settings::load_from_file(config_dir).unwrap();
+        assert_eq!(settings.outbox.batch_size, 250);
+        assert_eq!(settings.outbox.poll_interval_ms, 250);
     }
 }

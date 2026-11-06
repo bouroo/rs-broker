@@ -3,12 +3,13 @@
 use std::time::Duration;
 
 use rdkafka::config::ClientConfig;
+use rdkafka::error::RDKafkaErrorCode;
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 
 use crate::config::create_producer_config;
 use crate::error::{KafkaError, Result};
 use crate::headers::MessageHeaders;
-use rs_broker_config::KafkaConfig as AppKafkaConfig;
+use rs_broker_config::kafka::KafkaConfig as AppKafkaConfig;
 
 /// Kafka message to produce
 pub struct ProducerMessage {
@@ -61,9 +62,17 @@ impl KafkaProducer {
             record = record.headers(headers.to_rdkafka());
         }
 
-        self.producer
-            .send(record)
-            .map_err(|(e, _)| KafkaError::Producer(e.to_string()))?;
+        self.producer.send(record).map_err(|(e, _)| {
+            // A full local queue is backpressure, not a delivery failure:
+            // the message was never handed to the broker, so it is still
+            // good and must not consume the retry budget.
+            match e {
+                rdkafka::error::KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                    KafkaError::ProducerQueueFull(e.to_string())
+                }
+                _ => KafkaError::Producer(e.to_string()),
+            }
+        })?;
 
         Ok(())
     }

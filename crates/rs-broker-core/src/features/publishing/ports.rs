@@ -55,6 +55,14 @@ pub trait OutboxRepository: Send + Sync {
     /// which may be published again.
     async fn mark_published_batch(&self, ids: &[Uuid]) -> Result<u64, OutboxError>;
 
+    /// Return a claimed message to the pending pool without consuming a
+    /// retry.
+    ///
+    /// Used when the transport applies backpressure: the message was never
+    /// handed off, so it is still eligible and must not spend a retry
+    /// attempt on a failure that says nothing about the message.
+    async fn release_claim(&self, id: Uuid) -> Result<(), OutboxError>;
+
     /// Update message status
     async fn update_status(
         &self,
@@ -102,6 +110,16 @@ pub struct OutboundMessage {
 pub enum SinkError {
     #[error("{0}")]
     Transport(String),
+
+    /// The transport is applying backpressure: the message was not accepted
+    /// because the outbound queue is full, not because the message itself is
+    /// undeliverable.
+    ///
+    /// This is not a delivery failure and must not consume the retry budget:
+    /// the message is still perfectly good, and the queue will drain. A full
+    /// queue is the transport asking the caller to slow down.
+    #[error("{0}")]
+    Backpressure(String),
 }
 
 /// Port: where the publishing drain sends messages (Kafka today).

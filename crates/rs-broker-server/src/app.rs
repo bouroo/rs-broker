@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use rs_broker_config::Settings;
-use rs_broker_core::features::consuming::{Dispatcher, InboxManager};
+use rs_broker_core::features::consuming::{Dispatcher, InboxManager, InboxMessage};
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 use rs_broker_core::features::delivery::dispatcher::SubscriberDispatcher;
 use rs_broker_core::features::publishing::OutboxPublisher;
@@ -280,8 +280,8 @@ impl App {
 
         // Start the outbox publisher background worker using config values.
         if let Some(publisher) = publisher.as_mut() {
-            let batch_size = settings.server.publisher_batch_size;
-            let interval_ms = settings.server.publisher_interval_ms;
+            let batch_size = settings.outbox.batch_size;
+            let interval_ms = settings.outbox.poll_interval_ms;
             publisher.start(batch_size, interval_ms);
             tracing::info!(
                 "Outbox publisher started (batch_size={}, interval_ms={})",
@@ -366,6 +366,13 @@ fn spawn_subscriber_refresh(sd: std::sync::Arc<SubscriberDispatcher>) {
     });
 }
 
+/// Maximum number of inbox rows written in one batch.
+///
+/// Bounded so a burst of messages cannot grow the pending buffer without
+/// limit; at this size the batch insert stays well inside Postgres' bind
+/// parameter limit.
+const MAX_INBOX_BATCH: usize = 100;
+
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 fn spawn_consumer_loop(
     consumer: KafkaConsumer,
@@ -376,6 +383,11 @@ fn spawn_consumer_loop(
     let mut rx = consumer.stream();
 
     tokio::spawn(async move {
+        // Messages are drained from the channel in bursts and stored in one
+        // batch: storing each message separately made the consumer's cost
+        // per message a database round trip, which dominated its CPU.
+        let mut pending: Vec<InboxMessage> = Vec::with_capacity(MAX_INBOX_BATCH);
+
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(msg) => {
@@ -401,27 +413,12 @@ fn spawn_consumer_loop(
                         .unwrap_or("")
                         .to_string();
 
-                    match inbox
-                        .store_message(
-                            msg.topic.clone(),
-                            msg.partition,
-                            msg.offset,
-                            payload.clone(),
-                        )
-                        .await
-                    {
-                        Ok(id) => {
-                            tracing::trace!(
-                                "Stored incoming message {} from topic {}",
-                                id,
-                                msg.topic
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to store incoming message: {}", e);
-                            continue;
-                        }
-                    }
+                    pending.push(InboxMessage::new(
+                        msg.topic.clone(),
+                        msg.partition,
+                        msg.offset,
+                        payload,
+                    ));
 
                     // Dispatch to registered gRPC subscribers.
                     match dispatcher.dispatch(&msg.topic, &msg.payload).await {
@@ -458,6 +455,22 @@ fn spawn_consumer_loop(
                 Err(e) => {
                     tracing::warn!("Consumer stream error: {}", e);
                 }
+            }
+
+            // Flush the batch when it is full, or when the channel has
+            // nothing more to hand over right now.
+            if pending.len() >= MAX_INBOX_BATCH || rx.is_empty() {
+                if let Err(e) = inbox.store_messages(std::mem::take(&mut pending)).await {
+                    tracing::warn!("Failed to store incoming messages: {}", e);
+                }
+                pending.clear();
+            }
+        }
+
+        // Store whatever is left when the stream ends.
+        if !pending.is_empty() {
+            if let Err(e) = inbox.store_messages(pending).await {
+                tracing::warn!("Failed to store incoming messages: {}", e);
             }
         }
         tracing::info!("Consumer loop ended");
