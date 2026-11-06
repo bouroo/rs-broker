@@ -246,16 +246,18 @@ batch on a throttled cgroup stalls the request path. See
 
 Load-test results under constrained container resources, with k6 as the load
 generator — see [benchmark.md](benchmark.md) for the full methodology and
-caveats.
+caveats. k6, the broker and the infrastructure all share one container
+network, so no request pays a host network hop and the benchmark publishes
+no host ports.
 
 | Tier (per container) | Max sustained publish rate | Latency at that rate |
 |---|---|---|
-| 100m CPU / 64 MiB | ~1 140 req/s | p95 227 ms |
-| 200m CPU / 128 MiB | ~2 230 req/s | p95 242 ms |
+| 100m CPU / 64 MiB | ~1 135 req/s | p95 232 ms |
+| 200m CPU / 128 MiB | ~2 390 req/s | p95 69 ms |
 
 Batch publish (50 messages per request) absorbs **4 000 messages/s** at
-p95 4.1 ms with no failures. Memory is never the constraint — the producer
-peaks at 10 MiB of a 64 MiB limit; CPU is, and the failure mode past the
+p95 3.5 ms with no failures. Memory is never the constraint — the producer
+peaks at 22 MiB of a 64 MiB limit; CPU is, and the failure mode past the
 ceiling is a CFS-throttling stall rather than a slowdown.
 
 ```bash
