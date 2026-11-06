@@ -50,7 +50,7 @@ consumer for the same consumer group.
 | Host | macOS 27.2, arm64, 14 cores / 48 GiB |
 | Containers | Podman 6.0.2 machine, 4 vCPU / 4 GiB, cgroup v2 |
 | Load generator | k6 v2.3.0, on the host, outside the VM |
-| rs-broker | v0.2.0, `--release`, postgres feature |
+| rs-broker | this branch, `--release`, postgres feature |
 
 The load generator shares the same physical host as the containers, so
 absolute latency includes host networking. The *relative* numbers (100m vs

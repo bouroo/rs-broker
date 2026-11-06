@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "config",
@@ -2509,7 +2509,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2530,7 +2530,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-db"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2550,7 +2550,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-kafka"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "prost",
  "prost-types",
@@ -2581,7 +2581,7 @@ dependencies = [
 
 [[package]]
 name = "rs-broker-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
