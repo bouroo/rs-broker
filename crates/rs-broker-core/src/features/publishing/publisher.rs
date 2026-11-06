@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::features::publishing::{
-    ports::{MessageSink, OutboundMessage, OutboxRepository},
+    ports::{MessageSink, OutboundMessage, OutboxRepository, SinkError},
     retry::{PublishFailureDecision, RetryStrategy},
     MessageStatus,
 };
@@ -103,102 +103,124 @@ impl OutboxPublisher {
             };
 
             // Attempt to send to the sink. On failure, apply retry strategy:
+            //   - Backpressure (queue full): the message is still good and
+            //     the transport asked us to slow down. Put it back without
+            //     spending a retry, so a burst does not dead-letter good
+            //     messages.
             //   - If retries remain, increment retry count and set `retrying`.
             //   - If retries exhausted, set to `failed` or route to DLQ.
             let attempt = message.retry_count as u32;
 
-            if let Err(e) = sink.send(outbound) {
-                warn!(
-                    "Failed to send message {} (attempt {}): {}",
-                    message.id,
-                    attempt + 1,
-                    e
-                );
+            match sink.send(outbound) {
+                Ok(()) => published.push(message.id),
+                Err(SinkError::Backpressure(text)) => {
+                    warn!(
+                        "Publish backpressure for message {} (attempt {}): {}",
+                        message.id,
+                        attempt + 1,
+                        text
+                    );
 
-                // The retry→DLQ→failed ladder is the entity's rule; the
-                // use case only executes it.
-                match message.evaluate_publish_failure(retry_strategy) {
-                    PublishFailureDecision::Retry { next_delay } => {
-                        // Will be retried on the next tick — status stays `retrying`.
-                        let new_count = repository
-                            .increment_retry(message.id, Some(e.to_string()))
-                            .await
-                            .unwrap_or_else(|err| {
-                                error!(
+                    // Return the message to the outbox untouched: same
+                    // status, same retry count. The next tick tries again.
+                    if let Err(err) = repository.release_claim(message.id).await {
+                        error!(
+                            "Failed to release claim for message {} after backpressure: {}",
+                            message.id, err
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to send message {} (attempt {}): {}",
+                        message.id,
+                        attempt + 1,
+                        e
+                    );
+
+                    // The retry→DLQ→failed ladder is the entity's rule; the
+                    // use case only executes it.
+                    match message.evaluate_publish_failure(retry_strategy) {
+                        PublishFailureDecision::Retry { next_delay } => {
+                            // Will be retried on the next tick — status stays `retrying`.
+                            let new_count = repository
+                                .increment_retry(message.id, Some(e.to_string()))
+                                .await
+                                .unwrap_or_else(|err| {
+                                    error!(
                                     "Failed to increment retry for message {}: {} (original: {})",
                                     message.id, err, e
                                 );
-                                attempt as i32
-                            });
+                                    attempt as i32
+                                });
 
-                        let delay = retry_strategy.calculate_delay(new_count as u32);
-                        let _ = &next_delay; // decision carries the backoff the repository applies
-                        warn!(
-                            "Message {} scheduled for retry (attempt {}, next delay {:?})",
-                            message.id, new_count, delay
-                        );
-                    }
-                    PublishFailureDecision::DeadLetter { topic: dlq_topic } => {
-                        // Retries exhausted.
-                        error!(
-                            "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
-                            message.id, attempt
-                        );
-
-                        // Route to DLQ topic.
-                        let dlq_payload = serde_json::to_vec(&message.payload)?;
-                        let dlq_outbound = OutboundMessage {
-                            topic: dlq_topic.clone(),
-                            key: message.partition_key.clone(),
-                            payload: dlq_payload,
-                            partition: None,
-                        };
-
-                        if let Err(dlq_err) = sink.send(dlq_outbound) {
-                            error!(
-                                "Failed to send message {} to DLQ topic {}: {}",
-                                message.id, dlq_topic, dlq_err
+                            let delay = retry_strategy.calculate_delay(new_count as u32);
+                            let _ = &next_delay; // decision carries the backoff the repository applies
+                            warn!(
+                                "Message {} scheduled for retry (attempt {}, next delay {:?})",
+                                message.id, new_count, delay
                             );
                         }
-
-                        if let Err(db_err) = repository
-                            .update_status(
-                                message.id,
-                                MessageStatus::Dlq,
-                                Some(format!("exhausted {attempt} retries; last error: {e}")),
-                            )
-                            .await
-                        {
+                        PublishFailureDecision::DeadLetter { topic: dlq_topic } => {
+                            // Retries exhausted.
                             error!(
-                                "Failed to update status for message {} to dlq: {}",
-                                message.id, db_err
+                                "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
+                                message.id, attempt
                             );
+
+                            // Route to DLQ topic.
+                            let dlq_payload = serde_json::to_vec(&message.payload)?;
+                            let dlq_outbound = OutboundMessage {
+                                topic: dlq_topic.clone(),
+                                key: message.partition_key.clone(),
+                                payload: dlq_payload,
+                                partition: None,
+                            };
+
+                            if let Err(dlq_err) = sink.send(dlq_outbound) {
+                                error!(
+                                    "Failed to send message {} to DLQ topic {}: {}",
+                                    message.id, dlq_topic, dlq_err
+                                );
+                            }
+
+                            if let Err(db_err) = repository
+                                .update_status(
+                                    message.id,
+                                    MessageStatus::Dlq,
+                                    Some(format!("exhausted {attempt} retries; last error: {e}")),
+                                )
+                                .await
+                            {
+                                error!(
+                                    "Failed to update status for message {} to dlq: {}",
+                                    message.id, db_err
+                                );
+                            }
                         }
-                    }
-                    PublishFailureDecision::Fail => {
-                        // Retries exhausted.
-                        error!(
-                            "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
-                            message.id, attempt
-                        );
-
-                        if let Err(db_err) = repository
-                            .update_status(
-                                message.id,
-                                MessageStatus::Failed,
-                                Some(format!("exhausted {attempt} retries; last error: {e}")),
-                            )
-                            .await
-                        {
+                        PublishFailureDecision::Fail => {
+                            // Retries exhausted.
                             error!(
-                                "Failed to update status for message {} to failed: {}",
-                                message.id, db_err
+                                "Message {} exhausted retries (max {}). Moving to DLQ/failed.",
+                                message.id, attempt
                             );
+
+                            if let Err(db_err) = repository
+                                .update_status(
+                                    message.id,
+                                    MessageStatus::Failed,
+                                    Some(format!("exhausted {attempt} retries; last error: {e}")),
+                                )
+                                .await
+                            {
+                                error!(
+                                    "Failed to update status for message {} to failed: {}",
+                                    message.id, db_err
+                                );
+                            }
                         }
                     }
                 }
-            } else {
-                published.push(message.id);
             }
         }
 
@@ -368,6 +390,16 @@ mod tests {
             Ok(ids.len() as u64)
         }
 
+        async fn release_claim(&self, id: Uuid) -> Result<(), OutboxError> {
+            let mut guard = self.messages.lock().unwrap();
+            if let Some(msg) = guard.get_mut(&id) {
+                msg.status = MessageStatus::Pending;
+                Ok(())
+            } else {
+                Err(OutboxError::NotFound(id))
+            }
+        }
+
         async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {
             let mut guard = self.messages.lock().unwrap();
             match guard.get_mut(&id) {
@@ -428,6 +460,7 @@ mod tests {
 
     struct FakeSink {
         fail_topics: Vec<String>,
+        backpressure_topics: Vec<String>,
         sent_topics: Mutex<Vec<String>>,
     }
 
@@ -435,6 +468,15 @@ mod tests {
         fn failing_for(topics: &[&str]) -> Self {
             Self {
                 fail_topics: topics.iter().map(|t| t.to_string()).collect(),
+                backpressure_topics: Vec::new(),
+                sent_topics: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn backpressuring_for(topics: &[&str]) -> Self {
+            Self {
+                fail_topics: Vec::new(),
+                backpressure_topics: topics.iter().map(|t| t.to_string()).collect(),
                 sent_topics: Mutex::new(Vec::new()),
             }
         }
@@ -442,6 +484,12 @@ mod tests {
 
     impl MessageSink for FakeSink {
         fn send(&self, message: OutboundMessage) -> Result<(), SinkError> {
+            if self.backpressure_topics.contains(&message.topic) {
+                return Err(SinkError::Backpressure(format!(
+                    "queue full: {}",
+                    message.topic
+                )));
+            }
             if self.fail_topics.contains(&message.topic) {
                 return Err(SinkError::Transport(format!(
                     "send failed: {}",
@@ -499,6 +547,25 @@ mod tests {
         assert_eq!(
             repo.messages.lock().unwrap().get(&id).unwrap().retry_count,
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn backpressure_returns_the_message_without_spending_a_retry() {
+        let msg = message("orders", MessageStatus::Pending, 0);
+        let id = msg.id;
+        let repo = FakeRepo::with_messages(vec![msg]);
+        let sink = FakeSink::backpressuring_for(&["orders"]);
+
+        drain(&repo, &sink).await;
+
+        // Not published, not retried, not dead-lettered: the message is back
+        // in the pending pool, ready for the next tick.
+        assert!(repo.marked_batches.lock().unwrap().is_empty());
+        assert_eq!(repo.status_of(id), MessageStatus::Pending);
+        assert_eq!(
+            repo.messages.lock().unwrap().get(&id).unwrap().retry_count,
+            0
         );
     }
 

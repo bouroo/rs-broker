@@ -231,6 +231,10 @@ mod tests {
             Ok(0)
         }
 
+        async fn release_claim(&self, _id: Uuid) -> Result<(), OutboxError> {
+            Ok(())
+        }
+
         async fn increment_retry(
             &self,
             _id: Uuid,

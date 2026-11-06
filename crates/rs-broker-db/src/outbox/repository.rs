@@ -58,45 +58,95 @@ impl OutboxRepository for SqlxOutboxRepository {
         Ok(())
     }
 
+    /// Insert a batch of outbox messages with a single round trip.
+    ///
+    /// The previous implementation ran one `INSERT` per message inside a
+    /// transaction, so a 50-message batch cost 50 network round trips — the
+    /// dominant per-message cost under a small CPU quota. This version
+    /// pushes every column as a Postgres array and unnests it, so the whole
+    /// batch is one statement and one round trip.
     async fn create_batch(&self, messages: &[OutboxMessage]) -> Result<(), OutboxError> {
         if messages.is_empty() {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await.map_err(storage)?;
+        // Column order matches the INSERT below.
+        let mut ids = Vec::with_capacity(messages.len());
+        let mut aggregate_types = Vec::with_capacity(messages.len());
+        let mut aggregate_ids = Vec::with_capacity(messages.len());
+        let mut event_types = Vec::with_capacity(messages.len());
+        let mut payloads = Vec::with_capacity(messages.len());
+        let mut headers = Vec::with_capacity(messages.len());
+        let mut topics = Vec::with_capacity(messages.len());
+        let mut partition_keys = Vec::with_capacity(messages.len());
+        let mut statuses = Vec::with_capacity(messages.len());
+        let mut retry_counts = Vec::with_capacity(messages.len());
+        let mut error_messages = Vec::with_capacity(messages.len());
+        let mut created_at = Vec::with_capacity(messages.len());
+        let mut updated_at = Vec::with_capacity(messages.len());
+        let mut published_at = Vec::with_capacity(messages.len());
 
         for message in messages {
-            sqlx::query(
-                r#"
-                INSERT INTO outbox_messages (
-                    id, message_id, aggregate_type, aggregate_id, event_type,
-                    payload, headers, topic, partition_key,
-                    status, retry_count, error_message,
-                    created_at, updated_at, published_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                "#,
-            )
-            .bind(message.id)
-            .bind(message.id)
-            .bind(&message.aggregate_type)
-            .bind(&message.aggregate_id)
-            .bind(&message.event_type)
-            .bind(&message.payload)
-            .bind(&message.headers)
-            .bind(&message.topic)
-            .bind(&message.partition_key)
-            .bind(message.status.to_string())
-            .bind(message.retry_count)
-            .bind(&message.error_message)
-            .bind(message.created_at)
-            .bind(message.updated_at)
-            .bind(message.published_at)
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
+            ids.push(message.id);
+            aggregate_types.push(message.aggregate_type.clone());
+            aggregate_ids.push(message.aggregate_id.clone());
+            event_types.push(message.event_type.clone());
+            payloads.push(message.payload.clone());
+            headers.push(message.headers.clone());
+            topics.push(message.topic.clone());
+            partition_keys.push(message.partition_key.clone());
+            statuses.push(message.status.to_string());
+            retry_counts.push(message.retry_count);
+            error_messages.push(message.error_message.clone());
+            created_at.push(message.created_at);
+            updated_at.push(message.updated_at);
+            published_at.push(message.published_at);
         }
 
-        tx.commit().await.map_err(storage)?;
+        sqlx::query(
+            r#"
+            INSERT INTO outbox_messages (
+                id, message_id, aggregate_type, aggregate_id, event_type,
+                payload, headers, topic, partition_key,
+                status, retry_count, error_message,
+                created_at, updated_at, published_at
+            )
+            SELECT
+                id, id, aggregate_type, aggregate_id, event_type,
+                payload, headers, topic, partition_key,
+                status, retry_count, error_message,
+                created_at, updated_at, published_at
+            FROM UNNEST(
+                $1::uuid[], $2::text[], $3::text[], $4::text[],
+                $5::jsonb[], $6::jsonb[], $7::text[], $8::text[],
+                $9::text[], $10::int[], $11::text[],
+                $12::timestamptz[], $13::timestamptz[], $14::timestamptz[]
+            ) AS batch(
+                id, aggregate_type, aggregate_id, event_type,
+                payload, headers, topic, partition_key,
+                status, retry_count, error_message,
+                created_at, updated_at, published_at
+            )
+            "#,
+        )
+        .bind(ids)
+        .bind(aggregate_types)
+        .bind(aggregate_ids)
+        .bind(event_types)
+        .bind(payloads)
+        .bind(headers)
+        .bind(topics)
+        .bind(partition_keys)
+        .bind(statuses)
+        .bind(retry_counts)
+        .bind(error_messages)
+        .bind(created_at)
+        .bind(updated_at)
+        .bind(published_at)
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
+
         Ok(())
     }
 
@@ -176,6 +226,20 @@ impl OutboxRepository for SqlxOutboxRepository {
         .map_err(storage)?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn release_claim(&self, id: Uuid) -> Result<(), OutboxError> {
+        // Back to `pending`, retry count untouched: the transport never took
+        // the message, so this is not a failed attempt.
+        sqlx::query(
+            "UPDATE outbox_messages SET status = 'pending', updated_at = NOW() WHERE id = $1 AND status = 'publishing'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
+
+        Ok(())
     }
 
     async fn update_status(
@@ -381,6 +445,20 @@ impl OutboxRepository for SqlxOutboxRepository {
         }
 
         Ok(marked)
+    }
+
+    async fn release_claim(&self, id: Uuid) -> Result<(), OutboxError> {
+        // Back to `pending`, retry count untouched: the transport never took
+        // the message, so this is not a failed attempt.
+        sqlx::query(
+            "UPDATE outbox_messages SET status = 'pending', updated_at = NOW() WHERE id = ? AND status = 'publishing'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
+
+        Ok(())
     }
 
     async fn update_status(

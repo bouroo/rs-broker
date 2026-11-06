@@ -221,6 +221,18 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_RETRY__MAX_DELAY_MS` | `60000` | Maximum delay in ms |
 | `RS_BROKER_RETRY__JITTER_FACTOR` | `0.1` | Jitter factor (0.0–1.0) |
 
+### Outbox Publisher
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RS_BROKER_OUTBOX__POLL_INTERVAL_MS` | `100` | Milliseconds between publisher ticks |
+| `RS_BROKER_OUTBOX__BATCH_SIZE` | `100` | Outbox rows fetched per tick |
+| `RS_BROKER_OUTBOX__MAX_CONCURRENT` | `10` | Maximum concurrent publish tasks |
+
+On a small CPU quota the publisher's cadence must match the quota: a large
+batch on a throttled cgroup stalls the request path. See
+[benchmark.md](benchmark.md#where-the-limit-comes-from).
+
 ### Logging & Metrics
 
 | Variable | Default | Description |
@@ -230,6 +242,28 @@ Configuration is loaded in the following order (later sources override earlier):
 | `RS_BROKER_METRICS__ENABLED` | `true` | Enable Prometheus metrics |
 | `RS_BROKER_METRICS__PATH` | `/metrics` | Metrics endpoint path (served on the HTTP port) |
 
+## 📊 Benchmarks
+
+Load-test results under constrained container resources, with k6 as the load
+generator — see [benchmark.md](benchmark.md) for the full methodology and
+caveats.
+
+| Tier (per container) | Max sustained publish rate | Latency at that rate |
+|---|---|---|
+| 100m CPU / 64 MiB | ~1 140 req/s | p95 227 ms |
+| 200m CPU / 128 MiB | ~2 230 req/s | p95 242 ms |
+
+Batch publish (50 messages per request) absorbs **4 000 messages/s** at
+p95 4.1 ms with no failures. Memory is never the constraint — the producer
+peaks at 10 MiB of a 64 MiB limit; CPU is, and the failure mode past the
+ceiling is a CFS-throttling stall rather than a slowdown.
+
+```bash
+# One tier, one scenario (needs Docker, k6 and jq)
+./bench/run.sh 100m-64m single
+./bench/run.sh 200m-128m batch
+```
+
 ## 📁 Project Structure
 
 ```
@@ -237,6 +271,7 @@ rs-broker/
 ├── Cargo.toml                 # Workspace manifest
 ├── Containerfile                 # Multi-stage production build
 ├── compose.yml                # Docker Compose with profiles
+├── bench/                     # k6 load-test harness and results
 ├── crates/
 │   ├── rs-broker-config/      # Configuration management
 │   ├── rs-broker-core/        # Core business logic
